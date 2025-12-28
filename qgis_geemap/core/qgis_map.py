@@ -31,6 +31,7 @@ from .ee_layer import (
     ee_geometry_to_vector,
     get_ee_tile_url,
 )
+from .map_registry import set_active_map
 
 
 class Map(QObject):
@@ -76,6 +77,9 @@ class Map(QObject):
         self._iface = iface
         self._canvas = self._iface.mapCanvas() if self._iface else None
         self._project = QgsProject.instance()
+
+        # Register this Map instance as the active one
+        set_active_map(self)
 
         # Set initial view
         if self._canvas:
@@ -175,18 +179,24 @@ class Map(QObject):
             # Create point in EPSG:4326
             point_4326 = QgsPointXY(lon, lat)
 
+            # Get destination CRS, use EPSG:3857 (Web Mercator) as fallback
+            # This handles the case when no layers are loaded yet
+            dst_crs = self._canvas.mapSettings().destinationCrs()
+            if not dst_crs.isValid():
+                dst_crs = QgsCoordinateReferenceSystem("EPSG:3857")
+                self._project.setCrs(dst_crs)
+
             # Transform to map CRS
             src_crs = QgsCoordinateReferenceSystem("EPSG:4326")
-            dst_crs = self._canvas.mapSettings().destinationCrs()
             transform = QgsCoordinateTransform(src_crs, dst_crs, self._project)
             point_map = transform.transform(point_4326)
 
-            # Set center
-            self._canvas.setCenter(point_map)
-
-            # Set zoom if provided
+            # Set zoom first (before center) to ensure proper extent calculation
             if zoom is not None:
                 self.zoom = zoom
+
+            # Set center
+            self._canvas.setCenter(point_map)
 
             self._canvas.refresh()
             self._center = (lat, lon)
@@ -308,15 +318,24 @@ class Map(QObject):
             # If vis_params contains color/fillColor/etc, try vector
             # Otherwise, render as tiles
             use_vector = vis_params.get("as_vector", False)
+            progress_callback = vis_params.pop("_progress_callback", None)
 
             if use_vector:
-                layer = ee_feature_collection_to_vector(ee_object, name)
+                layer = ee_feature_collection_to_vector(
+                    ee_object, name, progress_callback=progress_callback
+                )
             else:
                 # Render FeatureCollection as styled image tiles
                 # Apply default styling if not provided
                 styled_fc = ee_object
-                if vis_params:
-                    styled_fc = ee_object.style(**vis_params)
+                # Remove our internal keys before passing to EE
+                style_params = {
+                    k: v
+                    for k, v in vis_params.items()
+                    if not k.startswith("_") and k != "as_vector"
+                }
+                if style_params:
+                    styled_fc = ee_object.style(**style_params)
                 layer = ee_to_qgis_layer(styled_fc, {}, name)
 
         elif isinstance(ee_object, ee.Feature):
@@ -384,7 +403,14 @@ class Map(QObject):
         """
         if name in self._layers:
             layer = self._layers[name]
-            self._project.removeMapLayer(layer.id())
+            try:
+                # Check if layer still exists in the project
+                layer_id = layer.id()
+                if self._project.mapLayer(layer_id) is not None:
+                    self._project.removeMapLayer(layer_id)
+            except (RuntimeError, AttributeError):
+                # Layer was already deleted (C++ object gone)
+                pass
             del self._layers[name]
             if name in self._ee_layers:
                 del self._ee_layers[name]
@@ -487,6 +513,15 @@ class Map(QObject):
     ) -> QgsMapLayer:
         """Alias for add_layer (for compatibility with some geemap code)."""
         return self.add_layer(ee_object, vis_params, name, shown, opacity)
+
+    def add(self, *args, **kwargs):
+        """Alias for add (for compatibility with some geemap code).
+
+        Args:
+            *args: Arguments for add.
+            **kwargs: Keyword arguments for add.
+        """
+        pass
 
     def zoom_to_bounds(self, bounds: List[List[float]]):
         """Zoom to the specified bounds.

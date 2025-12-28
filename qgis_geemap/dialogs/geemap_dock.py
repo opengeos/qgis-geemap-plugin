@@ -5,7 +5,7 @@ This module provides the main geemap panel for adding Earth Engine
 layers and performing common operations.
 """
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QCoreApplication
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
     QWidget,
@@ -26,8 +26,9 @@ from qgis.PyQt.QtWidgets import (
     QTabWidget,
     QPlainTextEdit,
     QSplitter,
+    QApplication,
 )
-from qgis.PyQt.QtGui import QFont
+from qgis.PyQt.QtGui import QFont, QCursor
 from qgis.core import QgsProject
 
 try:
@@ -261,18 +262,28 @@ class GeemapDockWidget(QDockWidget):
         return widget
 
     def _get_map(self):
-        """Get or create the Map instance."""
-        if self._map is None:
-            try:
-                from ..core.qgis_map import Map
+        """Get or create the Map instance.
 
+        Always gets the latest active map from the registry to ensure
+        we're working with the correct Map instance (the one with layers).
+        """
+        try:
+            from ..core.map_registry import get_active_map
+            from ..core.qgis_map import Map
+
+            # Always get the latest active map from registry
+            active_map = get_active_map()
+            if active_map is not None:
+                self._map = active_map
+            elif self._map is None:
+                # Create a new one only if none exists anywhere
                 self._map = Map()
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Error", f"Failed to create Map instance:\n{str(e)}"
-                )
-                return None
-        return self._map
+            return self._map
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to create Map instance:\n{str(e)}"
+            )
+            return None
 
     def _add_image_layer(self):
         """Add an Earth Engine Image layer."""
@@ -289,8 +300,12 @@ class GeemapDockWidget(QDockWidget):
             QMessageBox.warning(self, "Warning", "Please enter an asset ID.")
             return
 
+        # Set waiting cursor
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+
         try:
             self._show_progress("Loading image...")
+            QCoreApplication.processEvents()  # Update UI
 
             # Create the image
             image = ee.Image(asset_id)
@@ -323,6 +338,9 @@ class GeemapDockWidget(QDockWidget):
 
         except Exception as e:
             self._show_error(f"Failed to add image: {str(e)}")
+        finally:
+            # Restore cursor
+            QApplication.restoreOverrideCursor()
 
     def _add_fc_layer(self):
         """Add an Earth Engine FeatureCollection layer."""
@@ -339,8 +357,12 @@ class GeemapDockWidget(QDockWidget):
             QMessageBox.warning(self, "Warning", "Please enter an asset ID.")
             return
 
+        # Set waiting cursor
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+
         try:
             self._show_progress("Loading feature collection...")
+            QCoreApplication.processEvents()  # Update UI
 
             # Create the feature collection
             fc = ee.FeatureCollection(asset_id)
@@ -352,6 +374,8 @@ class GeemapDockWidget(QDockWidget):
             vis_params = {}
             if self.fc_as_vector.isChecked():
                 vis_params["as_vector"] = True
+                # Add progress callback for vector loading
+                vis_params["_progress_callback"] = self._update_progress_message
 
             # Add the layer
             m = self._get_map()
@@ -361,6 +385,14 @@ class GeemapDockWidget(QDockWidget):
 
         except Exception as e:
             self._show_error(f"Failed to add feature collection: {str(e)}")
+        finally:
+            # Restore cursor
+            QApplication.restoreOverrideCursor()
+
+    def _update_progress_message(self, message: str):
+        """Update the progress message and process events."""
+        self.status_label.setText(message)
+        QCoreApplication.processEvents()
 
     def _run_code(self):
         """Execute the code in the console."""

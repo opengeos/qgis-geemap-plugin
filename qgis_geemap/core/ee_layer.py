@@ -7,7 +7,7 @@ This module provides functions to convert Earth Engine objects to QGIS layers.
 import json
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 try:
     import ee
@@ -25,8 +25,22 @@ from qgis.core import (
     QgsFields,
     QgsPointXY,
     QgsWkbTypes,
+    QgsApplication,
+    QgsTask,
+    QgsMessageLog,
+    Qgis,
 )
-from qgis.PyQt.QtCore import QVariant
+from qgis.PyQt.QtCore import QVariant, QThread, pyqtSignal, QObject
+
+
+# Track if EE has been initialized
+_ee_initialized = False
+
+
+def is_ee_initialized() -> bool:
+    """Check if Earth Engine has been initialized."""
+    global _ee_initialized
+    return _ee_initialized
 
 
 def initialize_ee(project: str = None, credentials: Any = None) -> bool:
@@ -39,16 +53,22 @@ def initialize_ee(project: str = None, credentials: Any = None) -> bool:
     Returns:
         True if initialization was successful, False otherwise.
     """
+    global _ee_initialized
+
     if ee is None:
         raise ImportError(
             "The 'ee' module is not installed. Please install earthengine-api."
         )
+
+    if project is None or project == "":
+        project = os.environ.get("EE_PROJECT_ID", None)
 
     try:
         if project:
             ee.Initialize(credentials=credentials, project=project)
         else:
             ee.Initialize(credentials=credentials)
+        _ee_initialized = True
         return True
     except Exception as e:
         # Try to authenticate first
@@ -58,12 +78,47 @@ def initialize_ee(project: str = None, credentials: Any = None) -> bool:
                 ee.Initialize(credentials=credentials, project=project)
             else:
                 ee.Initialize(credentials=credentials)
+            _ee_initialized = True
             return True
         except Exception as auth_e:
             raise RuntimeError(
                 f"Failed to initialize Earth Engine: {e}\n"
                 f"Authentication also failed: {auth_e}"
             )
+
+
+def try_auto_initialize_ee() -> bool:
+    """Try to auto-initialize Earth Engine if EE_PROJECT_ID is set.
+
+    Returns:
+        True if initialization was successful, False otherwise.
+    """
+    global _ee_initialized
+
+    if _ee_initialized:
+        return True
+
+    if ee is None:
+        return False
+
+    project = os.environ.get("EE_PROJECT_ID", None)
+    if not project:
+        return False
+
+    try:
+        ee.Initialize(project=project)
+        _ee_initialized = True
+        QgsMessageLog.logMessage(
+            f"Earth Engine auto-initialized with project: {project}",
+            "Geemap",
+            Qgis.Info,
+        )
+        return True
+    except Exception as e:
+        QgsMessageLog.logMessage(
+            f"Failed to auto-initialize Earth Engine: {e}", "Geemap", Qgis.Warning
+        )
+        return False
 
 
 def get_ee_tile_url(
@@ -271,10 +326,34 @@ def _python_type_to_qvariant(value: Any) -> QVariant:
         return QVariant.String
 
 
+class FeatureCollectionLoaderWorker(QThread):
+    """Worker thread for loading FeatureCollection data from Earth Engine."""
+
+    finished = pyqtSignal(object)  # fc_info dict
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)
+
+    def __init__(self, fc, max_features: int = 5000):
+        super().__init__()
+        self.fc = fc
+        self.max_features = max_features
+
+    def run(self):
+        """Fetch the FeatureCollection data."""
+        try:
+            self.progress.emit("Fetching features from Earth Engine...")
+            fc_limited = self.fc.limit(self.max_features)
+            fc_info = fc_limited.getInfo()
+            self.finished.emit(fc_info)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 def ee_feature_collection_to_vector(
     fc: Any,
     name: str = "EE FeatureCollection",
     max_features: int = 5000,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> QgsVectorLayer:
     """Convert an Earth Engine FeatureCollection to a QGIS vector layer.
 
@@ -282,6 +361,7 @@ def ee_feature_collection_to_vector(
         fc: Earth Engine FeatureCollection.
         name: Name for the layer.
         max_features: Maximum number of features to fetch.
+        progress_callback: Optional callback for progress updates.
 
     Returns:
         QgsVectorLayer instance.
@@ -290,6 +370,9 @@ def ee_feature_collection_to_vector(
         raise ImportError(
             "The 'ee' module is not installed. Please install earthengine-api."
         )
+
+    if progress_callback:
+        progress_callback("Fetching features from Earth Engine...")
 
     # Get the feature collection info
     # Limit the number of features to avoid memory issues
@@ -304,10 +387,35 @@ def ee_feature_collection_to_vector(
     if not features_list:
         raise ValueError("FeatureCollection is empty")
 
-    # Determine geometry type from first feature
-    first_geom = features_list[0].get("geometry", {})
-    geom_type = first_geom.get("type", "Point").lower()
-    wkb_type = _get_qgis_wkb_type(geom_type)
+    if progress_callback:
+        progress_callback(f"Processing {len(features_list)} features...")
+
+    # Collect geometry types from all features to determine the best type
+    geom_types = set()
+    for feature_info in features_list:
+        geom = feature_info.get("geometry", {})
+        if geom:
+            geom_types.add(geom.get("type", "").lower())
+
+    # Determine the primary geometry type (prefer multi types for mixed)
+    if "multipolygon" in geom_types or (
+        "polygon" in geom_types and len(geom_types) > 1
+    ):
+        primary_type = "multipolygon"
+    elif "polygon" in geom_types:
+        primary_type = "polygon"
+    elif "multilinestring" in geom_types or (
+        "linestring" in geom_types and len(geom_types) > 1
+    ):
+        primary_type = "multilinestring"
+    elif "linestring" in geom_types:
+        primary_type = "linestring"
+    elif "multipoint" in geom_types or ("point" in geom_types and len(geom_types) > 1):
+        primary_type = "multipoint"
+    else:
+        primary_type = "point"
+
+    wkb_type = _get_qgis_wkb_type(primary_type)
 
     # Create memory layer
     type_str = {
@@ -317,7 +425,7 @@ def ee_feature_collection_to_vector(
         QgsWkbTypes.MultiLineString: "MultiLineString",
         QgsWkbTypes.Polygon: "Polygon",
         QgsWkbTypes.MultiPolygon: "MultiPolygon",
-    }.get(wkb_type, "Point")
+    }.get(wkb_type, "Polygon")
 
     layer = QgsVectorLayer(f"{type_str}?crs=EPSG:4326", name, "memory")
     provider = layer.dataProvider()
@@ -342,15 +450,33 @@ def ee_feature_collection_to_vector(
     provider.addAttributes(fields)
     layer.updateFields()
 
-    # Add features
+    if progress_callback:
+        progress_callback("Converting geometries...")
+
+    # Add features - process ALL features
     qgis_features = []
-    for feature_info in features_list:
+    total_features = len(features_list)
+
+    for idx, feature_info in enumerate(features_list):
         geom_info = feature_info.get("geometry")
         props = feature_info.get("properties", {}) or {}
 
         if geom_info:
             qgis_geom = _ee_geometry_to_qgis(geom_info)
             if qgis_geom:
+                # Handle geometry type conversion if needed
+                geom_type = geom_info.get("type", "").lower()
+
+                # Convert single geometries to multi if layer expects multi
+                if primary_type == "multipolygon" and geom_type == "polygon":
+                    qgis_geom = QgsGeometry.fromMultiPolygonXY([qgis_geom.asPolygon()])
+                elif primary_type == "multilinestring" and geom_type == "linestring":
+                    qgis_geom = QgsGeometry.fromMultiPolylineXY(
+                        [qgis_geom.asPolyline()]
+                    )
+                elif primary_type == "multipoint" and geom_type == "point":
+                    qgis_geom = QgsGeometry.fromMultiPointXY([qgis_geom.asPoint()])
+
                 feat = QgsFeature(layer.fields())
                 feat.setGeometry(qgis_geom)
 
@@ -363,8 +489,18 @@ def ee_feature_collection_to_vector(
 
                 qgis_features.append(feat)
 
+        # Update progress periodically
+        if progress_callback and (idx + 1) % 100 == 0:
+            progress_callback(f"Processed {idx + 1}/{total_features} features...")
+
+    if progress_callback:
+        progress_callback(f"Adding {len(qgis_features)} features to layer...")
+
     provider.addFeatures(qgis_features)
     layer.updateExtents()
+
+    if progress_callback:
+        progress_callback(f"Loaded {len(qgis_features)} features")
 
     return layer
 

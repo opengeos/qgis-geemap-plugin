@@ -30,9 +30,14 @@ class QgisGeemap:
         # Dock widgets (lazy loaded)
         self._geemap_dock = None
         self._settings_dock = None
+        self._inspector_dock = None
+        self._export_dock = None
 
         # Map instance
         self._map = None
+
+        # Inspector tool
+        self._inspector_tool = None
 
     def add_action(
         self,
@@ -113,6 +118,20 @@ class QgisGeemap:
         if not os.path.exists(init_icon):
             init_icon = ":/images/themes/default/mIconGlobe.svg"
 
+        # Inspector icon - prefer QGIS built-in for reliability
+        inspector_icon = os.path.join(icon_base, "inspector.svg")
+        if not os.path.exists(inspector_icon):
+            inspector_icon = ":/images/themes/default/mActionIdentify.svg"
+
+        # Export icon - use QGIS built-in download icon for reliability
+        export_icon = ":/images/themes/default/mActionFileSaveAs.svg"
+        custom_export_icon = os.path.join(icon_base, "export.svg")
+        if os.path.exists(custom_export_icon):
+            # Check if the icon loads properly
+            test_icon = QIcon(custom_export_icon)
+            if not test_icon.isNull():
+                export_icon = custom_export_icon
+
         # Add Geemap Panel action (checkable for dock toggle)
         self.geemap_action = self.add_action(
             main_icon,
@@ -132,6 +151,26 @@ class QgisGeemap:
             parent=self.iface.mainWindow(),
         )
 
+        # Add Inspector tool action (checkable)
+        self.inspector_action = self.add_action(
+            inspector_icon,
+            "Inspector",
+            self.toggle_inspector,
+            status_tip="Inspect Earth Engine layers at click location",
+            checkable=True,
+            parent=self.iface.mainWindow(),
+        )
+
+        # Add Export action (checkable for dock toggle)
+        self.export_action = self.add_action(
+            export_icon,
+            "Export Image",
+            self.toggle_export_dock,
+            status_tip="Export Earth Engine image to file",
+            checkable=True,
+            parent=self.iface.mainWindow(),
+        )
+
         # Add Settings Panel action (checkable for dock toggle)
         self.settings_action = self.add_action(
             settings_icon,
@@ -144,6 +183,9 @@ class QgisGeemap:
 
         # Add separator to menu
         self.menu.addSeparator()
+
+        # Try to auto-initialize Earth Engine
+        self._try_auto_init_ee()
 
         # Update icon
         update_icon = ":/images/themes/default/mActionRefresh.svg"
@@ -176,6 +218,11 @@ class QgisGeemap:
         # Restore original geemap.Map if patched
         self._unpatch_geemap()
 
+        # Remove inspector tool
+        if self._inspector_tool:
+            self.iface.mapCanvas().unsetMapTool(self._inspector_tool)
+            self._inspector_tool = None
+
         # Remove dock widgets
         if self._geemap_dock:
             self.iface.removeDockWidget(self._geemap_dock)
@@ -186,6 +233,16 @@ class QgisGeemap:
             self.iface.removeDockWidget(self._settings_dock)
             self._settings_dock.deleteLater()
             self._settings_dock = None
+
+        if self._inspector_dock:
+            self.iface.removeDockWidget(self._inspector_dock)
+            self._inspector_dock.deleteLater()
+            self._inspector_dock = None
+
+        if self._export_dock:
+            self.iface.removeDockWidget(self._export_dock)
+            self._export_dock.deleteLater()
+            self._export_dock = None
 
         # Remove actions from menu
         for action in self.actions:
@@ -218,6 +275,20 @@ class QgisGeemap:
                 geemap.Map = geemap._OriginalMap
                 delattr(geemap, "_OriginalMap")
         except Exception:
+            pass
+
+    def _try_auto_init_ee(self):
+        """Try to auto-initialize Earth Engine if EE_PROJECT_ID is set."""
+        try:
+            from .core.ee_layer import try_auto_initialize_ee
+
+            if try_auto_initialize_ee():
+                self.iface.messageBar().pushSuccess(
+                    "Geemap",
+                    "Earth Engine auto-initialized using EE_PROJECT_ID environment variable",
+                )
+        except Exception:
+            # Silently fail - user can manually initialize
             pass
 
     def initialize_ee(self):
@@ -319,6 +390,100 @@ class QgisGeemap:
     def _on_settings_visibility_changed(self, visible):
         """Handle Settings dock visibility change."""
         self.settings_action.setChecked(visible)
+
+    def toggle_inspector(self):
+        """Toggle the Inspector tool."""
+        if self._inspector_tool is None:
+            try:
+                from .dialogs.inspector_tool import (
+                    InspectorMapTool,
+                    InspectorDockWidget,
+                )
+
+                # Create inspector dock if not exists
+                if self._inspector_dock is None:
+                    self._inspector_dock = InspectorDockWidget(
+                        self.iface, self.iface.mainWindow()
+                    )
+                    self._inspector_dock.setObjectName("GeemapInspectorDock")
+                    self.iface.addDockWidget(
+                        Qt.RightDockWidgetArea, self._inspector_dock
+                    )
+
+                # Create and activate the map tool
+                self._inspector_tool = InspectorMapTool(
+                    self.iface.mapCanvas(), self._inspector_dock
+                )
+                self._inspector_tool.deactivated.connect(self._on_inspector_deactivated)
+                self.iface.mapCanvas().setMapTool(self._inspector_tool)
+                self._inspector_dock.show()
+                self._inspector_dock.raise_()
+                self.inspector_action.setChecked(True)
+                return
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self.iface.mainWindow(),
+                    "Error",
+                    f"Failed to create Inspector tool:\n{str(e)}",
+                )
+                self.inspector_action.setChecked(False)
+                return
+
+        # Toggle the tool
+        if self.iface.mapCanvas().mapTool() == self._inspector_tool:
+            self.iface.mapCanvas().unsetMapTool(self._inspector_tool)
+            self.inspector_action.setChecked(False)
+            if self._inspector_dock:
+                self._inspector_dock.hide()
+        else:
+            self.iface.mapCanvas().setMapTool(self._inspector_tool)
+            self.inspector_action.setChecked(True)
+            if self._inspector_dock:
+                self._inspector_dock.show()
+                self._inspector_dock.raise_()
+
+    def _on_inspector_deactivated(self):
+        """Handle Inspector tool deactivation."""
+        self.inspector_action.setChecked(False)
+
+    def toggle_export_dock(self):
+        """Toggle the Export dock widget visibility."""
+        if self._export_dock is None:
+            try:
+                from .dialogs.export_dock import ExportDockWidget
+
+                self._export_dock = ExportDockWidget(
+                    self.iface, self.iface.mainWindow()
+                )
+                self._export_dock.setObjectName("GeemapExportDock")
+                self._export_dock.visibilityChanged.connect(
+                    self._on_export_visibility_changed
+                )
+                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._export_dock)
+                self._export_dock.show()
+                self._export_dock.raise_()
+                return
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self.iface.mainWindow(),
+                    "Error",
+                    f"Failed to create Export panel:\n{str(e)}",
+                )
+                self.export_action.setChecked(False)
+                return
+
+        # Toggle visibility
+        if self._export_dock.isVisible():
+            self._export_dock.hide()
+        else:
+            self._export_dock.show()
+            self._export_dock.raise_()
+
+    def _on_export_visibility_changed(self, visible):
+        """Handle Export dock visibility change."""
+        self.export_action.setChecked(visible)
 
     def show_about(self):
         """Display the about dialog."""

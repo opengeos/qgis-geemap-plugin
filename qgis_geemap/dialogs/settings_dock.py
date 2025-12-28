@@ -188,7 +188,7 @@ class SettingsDockWidget(QDockWidget):
         # Auto-initialize
         self.auto_init_check = QCheckBox()
         self.auto_init_check.setChecked(False)
-        display_layout.addRow("Auto-initialize EE:", self.auto_init_check)
+        # display_layout.addRow("Auto-initialize EE:", self.auto_init_check)
 
         layout.addWidget(display_group)
 
