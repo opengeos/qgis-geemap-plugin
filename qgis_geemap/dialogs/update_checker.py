@@ -30,7 +30,7 @@ from qgis.PyQt.QtGui import QFont
 
 
 # GitHub URLs for the plugin
-GITHUB_REPO = "gee-community/qgis-geemap-plugin"
+GITHUB_REPO = "opengeos/qgis-geemap-plugin"
 GITHUB_BRANCH = "main"
 PLUGIN_PATH = "qgis_geemap"
 METADATA_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{PLUGIN_PATH}/metadata.txt"
