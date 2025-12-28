@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Magnifying glass -->
+  <circle cx="10" cy="10" r="6" fill="none" stroke="#4285F4" stroke-width="2"/>
+  <line x1="14.5" y1="14.5" x2="20" y2="20" stroke="#4285F4" stroke-width="2" stroke-linecap="round"/>
+  <!-- Info dot -->
+  <circle cx="10" cy="10" r="2" fill="#34A853"/>
+</svg>
