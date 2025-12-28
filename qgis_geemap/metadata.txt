@@ -1,0 +1,47 @@
+[general]
+name=Geemap
+qgisMinimumVersion=3.28
+description=A QGIS plugin that integrates geemap for working with Google Earth Engine data.
+version=0.1.0
+author=Qiusheng Wu
+email=giswqs@gmail.com
+
+about=QGIS Geemap brings the power of geemap and Google Earth Engine to QGIS.
+
+    Features:
+    - Add Earth Engine Image and ImageCollection layers to QGIS
+    - Add Earth Engine FeatureCollection layers as vector data
+    - Use familiar geemap Map API within QGIS
+    - Interactive map controls for center, zoom, and bounds
+    - Full compatibility with existing geemap code
+
+    This plugin allows you to use code like:
+
+    import ee
+    import geemap
+
+    m = geemap.Map(center=(40, -100), zoom=4)
+    dem = ee.Image("USGS/SRTMGL1_003")
+    m.add_layer(dem, {"min": 0, "max": 4000, "palette": ["green", "white"]}, "DEM")
+
+tracker=https://github.com/opengeos/qgis-geemap-plugin/issues
+repository=https://github.com/opengeos/qgis-geemap-plugin
+
+hasProcessingProvider=no
+
+tags=earth engine, google, geemap, remote sensing, satellite, gis, gee
+
+homepage=https://github.com/opengeos/qgis-geemap-plugin
+category=Raster
+icon=icons/logo.png
+
+experimental=False
+deprecated=False
+
+changelog=
+    0.1.0 - Initial release
+        - Earth Engine Image layer support via XYZ tiles
+        - Earth Engine FeatureCollection support as vector layers
+        - Map class with add_layer, set_center, center_object methods
+        - Settings panel for Earth Engine authentication
+        - Update checker functionality
