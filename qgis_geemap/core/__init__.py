@@ -14,6 +14,9 @@ from .ee_layer import (
     initialize_ee,
     try_auto_initialize_ee,
     is_ee_initialized,
+    colormap_to_palette,
+    is_matplotlib_colormap,
+    process_vis_params,
 )
 from .map_registry import (
     get_active_map,
@@ -31,6 +34,9 @@ __all__ = [
     "initialize_ee",
     "try_auto_initialize_ee",
     "is_ee_initialized",
+    "colormap_to_palette",
+    "is_matplotlib_colormap",
+    "process_vis_params",
     "get_active_map",
     "set_active_map",
     "get_ee_layers",
