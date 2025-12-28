@@ -14,6 +14,13 @@ try:
 except ImportError:
     ee = None
 
+try:
+    import matplotlib
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
 from qgis.core import (
     QgsProject,
     QgsRasterLayer,
@@ -35,6 +42,99 @@ from qgis.PyQt.QtCore import QVariant, QThread, pyqtSignal, QObject
 
 # Track if EE has been initialized
 _ee_initialized = False
+
+
+def is_matplotlib_colormap(palette: Any) -> bool:
+    """Check if the palette is a matplotlib colormap name.
+    
+    Args:
+        palette: A palette value (string or list).
+        
+    Returns:
+        True if palette is a valid matplotlib colormap name.
+    """
+    if not HAS_MATPLOTLIB:
+        return False
+    
+    if not isinstance(palette, str):
+        return False
+    
+    # Check if it's a known matplotlib colormap
+    try:
+        plt.get_cmap(palette)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def colormap_to_palette(
+    colormap: str,
+    n_colors: int = 256,
+) -> List[str]:
+    """Convert a matplotlib colormap to a list of hex colors.
+    
+    Args:
+        colormap: Name of a matplotlib colormap (e.g., "terrain", "viridis").
+        n_colors: Number of colors to generate.
+        
+    Returns:
+        List of hex color strings.
+    """
+    if not HAS_MATPLOTLIB:
+        raise ImportError(
+            "matplotlib is required for colormap support. "
+            "Please install it with: pip install matplotlib"
+        )
+    
+    try:
+        cmap = plt.get_cmap(colormap, n_colors)
+        colors = []
+        for i in range(n_colors):
+            rgba = cmap(i / (n_colors - 1) if n_colors > 1 else 0)
+            # Convert to hex
+            hex_color = "#{:02x}{:02x}{:02x}".format(
+                int(rgba[0] * 255),
+                int(rgba[1] * 255),
+                int(rgba[2] * 255),
+            )
+            colors.append(hex_color)
+        return colors
+    except Exception as e:
+        raise ValueError(f"Failed to convert colormap '{colormap}': {e}")
+
+
+def process_vis_params(vis_params: Optional[Dict]) -> Dict:
+    """Process visualization parameters, converting matplotlib colormaps if needed.
+    
+    Args:
+        vis_params: Visualization parameters dictionary.
+        
+    Returns:
+        Processed visualization parameters with palette converted if needed.
+    """
+    if vis_params is None:
+        return {}
+    
+    # Make a copy to avoid modifying the original
+    processed = vis_params.copy()
+    
+    # Check if palette needs conversion
+    palette = processed.get("palette")
+    if palette is not None:
+        if isinstance(palette, str):
+            # Check if it's a matplotlib colormap
+            if is_matplotlib_colormap(palette):
+                # Convert colormap to list of hex colors
+                processed["palette"] = colormap_to_palette(palette)
+            elif "," in palette:
+                # Handle comma-separated color string
+                processed["palette"] = [c.strip() for c in palette.split(",")]
+            # Otherwise leave as-is (might be a single color name)
+        elif isinstance(palette, (list, tuple)):
+            # Already a list, ensure it's a regular list
+            processed["palette"] = list(palette)
+    
+    return processed
 
 
 def is_ee_initialized() -> bool:
@@ -130,6 +230,7 @@ def get_ee_tile_url(
     Args:
         ee_object: An Earth Engine Image or ImageCollection.
         vis_params: Visualization parameters dictionary.
+            Supports matplotlib colormap names as palette (e.g., "terrain", "viridis").
 
     Returns:
         XYZ tile URL string.
@@ -139,7 +240,8 @@ def get_ee_tile_url(
             "The 'ee' module is not installed. Please install earthengine-api."
         )
 
-    vis_params = vis_params or {}
+    # Process vis_params to handle matplotlib colormaps
+    vis_params = process_vis_params(vis_params)
 
     # Handle ImageCollection by taking the first image or mosaic
     if isinstance(ee_object, ee.ImageCollection):
@@ -166,6 +268,7 @@ def get_ee_tile_url_legacy(
     Args:
         ee_object: An Earth Engine Image or ImageCollection.
         vis_params: Visualization parameters dictionary.
+            Supports matplotlib colormap names as palette (e.g., "terrain", "viridis").
 
     Returns:
         XYZ tile URL string.
@@ -175,7 +278,8 @@ def get_ee_tile_url_legacy(
             "The 'ee' module is not installed. Please install earthengine-api."
         )
 
-    vis_params = vis_params or {}
+    # Process vis_params to handle matplotlib colormaps
+    vis_params = process_vis_params(vis_params)
 
     # Handle ImageCollection by taking the mosaic
     if isinstance(ee_object, ee.ImageCollection):
