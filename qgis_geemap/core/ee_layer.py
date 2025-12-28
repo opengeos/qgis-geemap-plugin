@@ -17,6 +17,7 @@ except ImportError:
 try:
     import matplotlib
     import matplotlib.pyplot as plt
+
     HAS_MATPLOTLIB = True
 except ImportError:
     HAS_MATPLOTLIB = False
@@ -46,19 +47,19 @@ _ee_initialized = False
 
 def is_matplotlib_colormap(palette: Any) -> bool:
     """Check if the palette is a matplotlib colormap name.
-    
+
     Args:
         palette: A palette value (string or list).
-        
+
     Returns:
         True if palette is a valid matplotlib colormap name.
     """
     if not HAS_MATPLOTLIB:
         return False
-    
+
     if not isinstance(palette, str):
         return False
-    
+
     # Check if it's a known matplotlib colormap
     try:
         plt.get_cmap(palette)
@@ -72,11 +73,11 @@ def colormap_to_palette(
     n_colors: int = 256,
 ) -> List[str]:
     """Convert a matplotlib colormap to a list of hex colors.
-    
+
     Args:
         colormap: Name of a matplotlib colormap (e.g., "terrain", "viridis").
         n_colors: Number of colors to generate.
-        
+
     Returns:
         List of hex color strings.
     """
@@ -85,7 +86,7 @@ def colormap_to_palette(
             "matplotlib is required for colormap support. "
             "Please install it with: pip install matplotlib"
         )
-    
+
     try:
         cmap = plt.get_cmap(colormap, n_colors)
         colors = []
@@ -105,19 +106,19 @@ def colormap_to_palette(
 
 def process_vis_params(vis_params: Optional[Dict]) -> Dict:
     """Process visualization parameters, converting matplotlib colormaps if needed.
-    
+
     Args:
         vis_params: Visualization parameters dictionary.
-        
+
     Returns:
         Processed visualization parameters with palette converted if needed.
     """
     if vis_params is None:
         return {}
-    
+
     # Make a copy to avoid modifying the original
     processed = vis_params.copy()
-    
+
     # Check if palette needs conversion
     palette = processed.get("palette")
     if palette is not None:
@@ -133,7 +134,7 @@ def process_vis_params(vis_params: Optional[Dict]) -> Dict:
         elif isinstance(palette, (list, tuple)):
             # Already a list, ensure it's a regular list
             processed["palette"] = list(palette)
-    
+
     return processed
 
 
