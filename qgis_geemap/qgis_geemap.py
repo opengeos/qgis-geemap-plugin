@@ -283,10 +283,11 @@ class QgisGeemap:
             from .core.ee_layer import try_auto_initialize_ee
 
             if try_auto_initialize_ee():
-                self.iface.messageBar().pushSuccess(
-                    "Geemap",
-                    "Earth Engine auto-initialized using EE_PROJECT_ID environment variable",
-                )
+                pass
+                # self.iface.messageBar().pushSuccess(
+                #     "Geemap",
+                #     "Earth Engine auto-initialized using EE_PROJECT_ID environment variable",
+                # )
         except Exception:
             # Silently fail - user can manually initialize
             pass
