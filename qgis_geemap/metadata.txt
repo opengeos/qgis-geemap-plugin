@@ -2,7 +2,7 @@
 name=Geemap
 qgisMinimumVersion=3.28
 description=A QGIS plugin that integrates geemap for working with Google Earth Engine data.
-version=0.1.0
+version=0.2.0
 author=Qiusheng Wu
 email=giswqs@gmail.com
 
@@ -39,6 +39,9 @@ experimental=False
 deprecated=False
 
 changelog=
+    0.2.0
+        - Improve inspector performance
+        - Fix inspector layer refresh bug
     0.1.0 - Initial release
         - Earth Engine Image layer support via XYZ tiles
         - Earth Engine FeatureCollection support as vector layers

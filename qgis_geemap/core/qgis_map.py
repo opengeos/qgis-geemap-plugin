@@ -31,7 +31,12 @@ from .ee_layer import (
     ee_geometry_to_vector,
     get_ee_tile_url,
 )
-from .map_registry import set_active_map
+from .map_registry import (
+    set_active_map,
+    register_ee_layer,
+    unregister_ee_layer,
+    cleanup_removed_layers,
+)
 
 
 class Map(QObject):
@@ -52,6 +57,9 @@ class Map(QObject):
 
     layer_added = pyqtSignal(object, str)  # layer, name
     center_changed = pyqtSignal(float, float)  # lat, lon
+
+    # Class variable to track if global signal handler is connected
+    _signal_connected = False
 
     def __init__(
         self,
@@ -80,6 +88,11 @@ class Map(QObject):
 
         # Register this Map instance as the active one
         set_active_map(self)
+
+        # Connect to layer removal signal to clean up registry (only once globally)
+        if not Map._signal_connected and self._project:
+            self._project.layersRemoved.connect(cleanup_removed_layers)
+            Map._signal_connected = True
 
         # Set initial view
         if self._canvas:
@@ -371,6 +384,9 @@ class Map(QObject):
             self._layers[name] = layer
             self._ee_layers[name] = (ee_object, vis_params)
 
+            # Register globally for inspector (with layer ID for cleanup tracking)
+            register_ee_layer(name, ee_object, vis_params, layer.id())
+
             # Refresh canvas
             if self._canvas:
                 self._canvas.refresh()
@@ -411,9 +427,15 @@ class Map(QObject):
             except (RuntimeError, AttributeError):
                 # Layer was already deleted (C++ object gone)
                 pass
+
+            # Clean up local references
             del self._layers[name]
             if name in self._ee_layers:
                 del self._ee_layers[name]
+
+            # Unregister from global registry (this also removes from global layer_ids)
+            unregister_ee_layer(name)
+
             return True
         return False
 
