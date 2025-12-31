@@ -39,7 +39,7 @@ experimental=False
 deprecated=False
 
 changelog=
-    0.2.0 
+    0.2.0
         - Improve inspector performance
         - Fix inspector layer refresh bug
     0.1.0 - Initial release
