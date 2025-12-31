@@ -23,6 +23,10 @@ from .map_registry import (
     set_active_map,
     get_ee_layers,
     clear_active_map,
+    register_ee_layer,
+    unregister_ee_layer,
+    clear_all_ee_layers,
+    cleanup_removed_layers,
 )
 
 __all__ = [
@@ -41,4 +45,8 @@ __all__ = [
     "set_active_map",
     "get_ee_layers",
     "clear_active_map",
+    "register_ee_layer",
+    "unregister_ee_layer",
+    "clear_all_ee_layers",
+    "cleanup_removed_layers",
 ]

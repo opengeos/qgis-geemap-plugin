@@ -81,18 +81,40 @@ class InspectorWorker(QThread):
 
                 if isinstance(ee_object, ee.Image):
                     # Sample the image at the point
-                    sample = ee_object.sample(
-                        region=point_geom,
-                        scale=self.scale,
-                        geometries=True,
-                    ).first()
+                    # Use reduceRegion instead of sample for more reliable point sampling
+                    point_buffer = point_geom.buffer(self.scale / 2)
 
-                    if sample:
-                        props = sample.getInfo()
-                        if props and "properties" in props:
+                    # Try to get band names to check if this is a valid data image
+                    try:
+                        band_names = ee_object.bandNames().getInfo()
+                    except Exception:
+                        band_names = []
+
+                    if not band_names:
+                        # No bands - likely a styled/visualization image
+                        results["layers"][name] = {
+                            "type": "Image",
+                            "values": {"note": "Visualization layer (no band data)"},
+                        }
+                        continue
+
+                    sampled = ee_object.reduceRegion(
+                        reducer=ee.Reducer.first(),
+                        geometry=point_buffer,
+                        scale=self.scale,
+                        bestEffort=True,
+                        maxPixels=1,
+                    ).getInfo()
+
+                    if sampled and any(v is not None for v in sampled.values()):
+                        # Filter out None values
+                        filtered_values = {
+                            k: v for k, v in sampled.items() if v is not None
+                        }
+                        if filtered_values:
                             results["layers"][name] = {
                                 "type": "Image",
-                                "values": props["properties"],
+                                "values": filtered_values,
                             }
                         else:
                             results["layers"][name] = {
@@ -106,20 +128,26 @@ class InspectorWorker(QThread):
                         }
 
                 elif isinstance(ee_object, ee.ImageCollection):
-                    # Get the first image and sample it
+                    # Get the mosaic and sample it
                     image = ee_object.mosaic()
-                    sample = image.sample(
-                        region=point_geom,
+                    point_buffer = point_geom.buffer(self.scale / 2)
+                    sampled = image.reduceRegion(
+                        reducer=ee.Reducer.first(),
+                        geometry=point_buffer,
                         scale=self.scale,
-                        geometries=True,
-                    ).first()
+                        bestEffort=True,
+                        maxPixels=1,
+                    ).getInfo()
 
-                    if sample:
-                        props = sample.getInfo()
-                        if props and "properties" in props:
+                    if sampled and any(v is not None for v in sampled.values()):
+                        # Filter out None values
+                        filtered_values = {
+                            k: v for k, v in sampled.items() if v is not None
+                        }
+                        if filtered_values:
                             results["layers"][name] = {
                                 "type": "ImageCollection",
-                                "values": props["properties"],
+                                "values": filtered_values,
                             }
                         else:
                             results["layers"][name] = {
