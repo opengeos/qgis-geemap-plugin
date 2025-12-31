@@ -135,6 +135,9 @@ class InspectorWorker(QThread):
                 elif isinstance(ee_object, ee.FeatureCollection):
                     # Filter features that contain the point
                     filtered = ee_object.filterBounds(point_geom)
+                    filtered = filtered.map(
+                        lambda f: ee.Feature(None, f.toDictionary(f.propertyNames()))
+                    )
                     count = filtered.size().getInfo()
 
                     if count > 0:
