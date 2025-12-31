@@ -13,6 +13,12 @@ A QGIS plugin that integrates [geemap](https://geemap.org) for working with Goog
 - **Settings Panel**: Configure Earth Engine authentication and plugin options
 - **Update Checker**: Check for and install plugin updates from GitHub
 
+## Video Tutorial
+
+👉 [QGIS Geemap Plugin: Running Google Earth Engine and Jupyter Notebook within QGIS](https://youtu.be/QHFp0v579Hc)
+
+[![QGIS Geemap Plugin](https://github.com/user-attachments/assets/5907407b-27da-4b07-8bf1-6d245cfc6aec)](https://youtu.be/QHFp0v579Hc)
+
 ## Installation
 
 ### Prerequisites
