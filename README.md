@@ -2,6 +2,7 @@
 
 A QGIS plugin that integrates [geemap](https://geemap.org) for working with Google Earth Engine data directly in QGIS.
 
+[![QGIS Plugin](https://img.shields.io/badge/QGIS-Plugin-green.svg)](https://plugins.qgis.org/plugins/qgis_geemap)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
