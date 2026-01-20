@@ -40,7 +40,6 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant, QThread, pyqtSignal, QObject
 
-
 # Track if EE has been initialized
 _ee_initialized = False
 
