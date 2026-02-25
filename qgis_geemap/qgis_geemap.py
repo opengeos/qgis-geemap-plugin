@@ -39,6 +39,57 @@ class QgisGeemap:
         # Inspector tool
         self._inspector_tool = None
 
+        # Dependency state
+        self._deps_ready = False
+        self._deps_initialized = False
+
+    def _ensure_deps(self) -> bool:
+        """Check if dependencies are installed; prompt to install if not.
+
+        Returns:
+            True if dependencies are ready and loaded, False otherwise.
+        """
+        if self._deps_ready:
+            return True
+
+        from .core.venv_manager import ensure_venv_packages_available, get_venv_status
+
+        is_ready, status_msg = get_venv_status()
+
+        if is_ready:
+            if ensure_venv_packages_available():
+                self._deps_ready = True
+                self._post_deps_init()
+                return True
+            QMessageBox.critical(
+                self.iface.mainWindow(),
+                "Error",
+                "Failed to load dependency packages into Python path.",
+            )
+            return False
+
+        # Dependencies not ready -- show install dialog
+        from .dialogs.dependency_dialog import DependencyInstallDialog
+
+        dialog = DependencyInstallDialog(self.iface.mainWindow())
+        result = dialog.exec_()
+
+        if result == dialog.Accepted:
+            if ensure_venv_packages_available():
+                self._deps_ready = True
+                self._post_deps_init()
+                return True
+
+        return False
+
+    def _post_deps_init(self):
+        """One-time initialization after dependencies are confirmed ready."""
+        if self._deps_initialized:
+            return
+        self._deps_initialized = True
+        self._patch_geemap()
+        self._try_auto_init_ee()
+
     def add_action(
         self,
         icon_path,
@@ -184,9 +235,6 @@ class QgisGeemap:
         # Add separator to menu
         self.menu.addSeparator()
 
-        # Try to auto-initialize Earth Engine
-        self._try_auto_init_ee()
-
         # Update icon
         update_icon = ":/images/themes/default/mActionRefresh.svg"
 
@@ -209,9 +257,6 @@ class QgisGeemap:
             status_tip="About QGIS Geemap",
             parent=self.iface.mainWindow(),
         )
-
-        # Patch geemap module if available
-        self._patch_geemap()
 
     def unload(self):
         """Remove the plugin menu item and icon from QGIS GUI."""
@@ -294,6 +339,8 @@ class QgisGeemap:
 
     def initialize_ee(self):
         """Initialize Google Earth Engine."""
+        if not self._ensure_deps():
+            return
         try:
             from .core.ee_layer import initialize_ee
 
@@ -318,6 +365,9 @@ class QgisGeemap:
 
     def toggle_geemap_dock(self):
         """Toggle the Geemap dock widget visibility."""
+        if not self._ensure_deps():
+            self.geemap_action.setChecked(False)
+            return
         if self._geemap_dock is None:
             try:
                 from .dialogs.geemap_dock import GeemapDockWidget
@@ -356,6 +406,9 @@ class QgisGeemap:
 
     def toggle_settings_dock(self):
         """Toggle the Settings dock widget visibility."""
+        if not self._ensure_deps():
+            self.settings_action.setChecked(False)
+            return
         if self._settings_dock is None:
             try:
                 from .dialogs.settings_dock import SettingsDockWidget
@@ -394,6 +447,9 @@ class QgisGeemap:
 
     def toggle_inspector(self):
         """Toggle the Inspector tool."""
+        if not self._ensure_deps():
+            self.inspector_action.setChecked(False)
+            return
         if self._inspector_tool is None:
             try:
                 from .dialogs.inspector_tool import (
@@ -450,6 +506,9 @@ class QgisGeemap:
 
     def toggle_export_dock(self):
         """Toggle the Export dock widget visibility."""
+        if not self._ensure_deps():
+            self.export_action.setChecked(False)
+            return
         if self._export_dock is None:
             try:
                 from .dialogs.export_dock import ExportDockWidget
