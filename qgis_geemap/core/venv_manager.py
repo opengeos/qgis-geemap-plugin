@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Callable, Optional, Tuple
 
 from qgis.core import QgsMessageLog, Qgis
 
@@ -879,14 +880,49 @@ def ensure_venv_packages_available():
         _log(f"Venv site-packages not found in: {VENV_DIR}", Qgis.Warning)
         return False
 
-    if site_packages not in sys.path:
+    path_was_missing = site_packages not in sys.path
+    if path_was_missing:
         # Append (not insert at 0) so QGIS's built-in packages (numpy,
         # etc.) keep priority.  Venv-only packages (geemap, ee) are still
         # found because QGIS doesn't ship them.
         sys.path.append(site_packages)
         _log(f"Added venv site-packages to sys.path: {site_packages}")
 
+        # Re-import ee into modules that cached ``ee = None`` at startup
+        # (before the venv path was available).
+        _refresh_ee_in_modules()
+
     return True
+
+
+def _refresh_ee_in_modules():
+    """Re-import the ``ee`` module into plugin modules that cached it as None.
+
+    Several plugin modules use a top-level ``try: import ee / except: ee = None``
+    pattern.  If the venv site-packages path was not yet on ``sys.path`` when
+    those modules were first imported, their module-level ``ee`` stays ``None``
+    even after the path is added.  This function performs a fresh import and
+    patches the reference in every affected module.
+    """
+    try:
+        import ee  # noqa: F811 — intentional re-import
+    except ImportError:
+        return  # ee not installable yet; nothing to patch
+
+    # Modules that cache ``ee`` at module level.
+    _module_names = [
+        "qgis_geemap.core.ee_layer",
+        "qgis_geemap.core.qgis_map",
+        "qgis_geemap.dialogs.settings_dock",
+        "qgis_geemap.dialogs.export_dock",
+        "qgis_geemap.dialogs.inspector_tool",
+        "qgis_geemap.dialogs.geemap_dock",
+    ]
+    for name in _module_names:
+        mod = sys.modules.get(name)
+        if mod is not None and getattr(mod, "ee", None) is None:
+            mod.ee = ee
+            _log(f"Refreshed 'ee' reference in {name}")
 
 
 # ---------------------------------------------------------------------------

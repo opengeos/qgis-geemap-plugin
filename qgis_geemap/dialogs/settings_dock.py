@@ -5,6 +5,8 @@ This module provides a settings panel for configuring
 Earth Engine authentication and plugin options.
 """
 
+import os
+
 from qgis.PyQt.QtCore import Qt, QSettings, pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
@@ -422,13 +424,25 @@ class SettingsDockWidget(QDockWidget):
                 self,
                 "Warning",
                 "Earth Engine API not installed.\n\n"
-                "Install with: pip install earthengine-api",
+                "Please install dependencies from the Dependencies tab first.",
             )
             return
 
-        try:
-            project = self.project_id_input.text().strip() or None
+        project = self.project_id_input.text().strip()
+        if not project:
+            project = os.environ.get("EE_PROJECT_ID", "")
 
+        if not project:
+            QMessageBox.warning(
+                self,
+                "Project ID Required",
+                "A Google Cloud project ID is required to initialize "
+                "Earth Engine.\n\nPlease enter your project ID above.",
+            )
+            self.project_id_input.setFocus()
+            return
+
+        try:
             # Check if credentials file is specified
             cred_file = self.credentials_input.text().strip()
             credentials = None
@@ -441,10 +455,7 @@ class SettingsDockWidget(QDockWidget):
                     scopes=["https://www.googleapis.com/auth/earthengine"],
                 )
 
-            if project:
-                ee.Initialize(credentials=credentials, project=project)
-            else:
-                ee.Initialize(credentials=credentials)
+            ee.Initialize(credentials=credentials, project=project)
 
             self.ee_status_label.setText("Status: Initialized ✓")
             self.ee_status_label.setStyleSheet("color: green;")
@@ -453,7 +464,7 @@ class SettingsDockWidget(QDockWidget):
             )
 
         except Exception as e:
-            self.ee_status_label.setText(f"Status: Error")
+            self.ee_status_label.setText("Status: Error")
             self.ee_status_label.setStyleSheet("color: red;")
             QMessageBox.critical(
                 self,
