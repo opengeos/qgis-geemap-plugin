@@ -143,12 +143,52 @@ def is_ee_initialized() -> bool:
     return _ee_initialized
 
 
+def _load_ee_credentials():
+    """Load Earth Engine OAuth2 credentials from the credentials file.
+
+    Reads ``~/.config/earthengine/credentials`` and builds an
+    ``google.oauth2.credentials.Credentials`` object that can be passed
+    to ``ee.Initialize()``.  This is more reliable than relying on
+    ``ee``'s built-in auto-discovery inside the QGIS process, where
+    bundled library versions may conflict with the venv packages.
+
+    Returns:
+        A ``google.oauth2.credentials.Credentials`` instance, or *None*
+        if the file does not exist or cannot be parsed.
+    """
+    cred_path = os.path.expanduser("~/.config/earthengine/credentials")
+    if not os.path.exists(cred_path):
+        return None
+
+    try:
+        with open(cred_path) as f:
+            data = json.load(f)
+
+        refresh_token = data.get("refresh_token")
+        if not refresh_token:
+            return None
+
+        from google.oauth2.credentials import Credentials
+
+        return Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=data.get("client_id"),
+            client_secret=data.get("client_secret"),
+        )
+    except Exception:
+        return None
+
+
 def initialize_ee(project: str = None, credentials: Any = None) -> bool:
     """Initialize Earth Engine.
 
     Args:
-        project: Google Cloud project ID.
-        credentials: Optional credentials object.
+        project: Google Cloud project ID.  Required by modern earthengine-api
+            versions.  Falls back to the ``EE_PROJECT_ID`` environment variable.
+        credentials: Optional credentials object.  When *None*, credentials
+            are loaded from ``~/.config/earthengine/credentials``.
 
     Returns:
         True if initialization was successful, False otherwise.
@@ -163,28 +203,25 @@ def initialize_ee(project: str = None, credentials: Any = None) -> bool:
     if project is None or project == "":
         project = os.environ.get("EE_PROJECT_ID", None)
 
+    if not project:
+        raise ValueError(
+            "A Google Cloud project ID is required to initialize Earth Engine.\n"
+            "Set it in Geemap Settings \u2192 Earth Engine, or set the "
+            "EE_PROJECT_ID environment variable."
+        )
+
+    # If no explicit credentials provided, load them from disk so we don't
+    # rely on ee's auto-discovery (which can fail inside QGIS due to
+    # bundled library version conflicts).
+    if credentials is None:
+        credentials = _load_ee_credentials()
+
     try:
-        if project:
-            ee.Initialize(credentials=credentials, project=project)
-        else:
-            ee.Initialize(credentials=credentials)
+        ee.Initialize(credentials=credentials, project=project)
         _ee_initialized = True
         return True
     except Exception as e:
-        # Try to authenticate first
-        try:
-            ee.Authenticate()
-            if project:
-                ee.Initialize(credentials=credentials, project=project)
-            else:
-                ee.Initialize(credentials=credentials)
-            _ee_initialized = True
-            return True
-        except Exception as auth_e:
-            raise RuntimeError(
-                f"Failed to initialize Earth Engine: {e}\n"
-                f"Authentication also failed: {auth_e}"
-            )
+        raise RuntimeError(f"Failed to initialize Earth Engine: {e}")
 
 
 def try_auto_initialize_ee() -> bool:
@@ -205,8 +242,10 @@ def try_auto_initialize_ee() -> bool:
     if not project:
         return False
 
+    credentials = _load_ee_credentials()
+
     try:
-        ee.Initialize(project=project)
+        ee.Initialize(credentials=credentials, project=project)
         _ee_initialized = True
         QgsMessageLog.logMessage(
             f"Earth Engine auto-initialized with project: {project}",

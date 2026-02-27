@@ -5,7 +5,9 @@ This module provides a settings panel for configuring
 Earth Engine authentication and plugin options.
 """
 
-from qgis.PyQt.QtCore import Qt, QSettings
+import os
+
+from qgis.PyQt.QtCore import Qt, QSettings, pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
     QWidget,
@@ -22,6 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QTabWidget,
+    QProgressBar,
 )
 from qgis.PyQt.QtGui import QFont
 
@@ -33,6 +36,13 @@ except ImportError:
 
 class SettingsDockWidget(QDockWidget):
     """A settings panel for configuring geemap options."""
+
+    # Emitted when dependencies are successfully installed
+    deps_installed = pyqtSignal()
+    # Emitted when EE authentication succeeds
+    auth_succeeded = pyqtSignal()
+    # Emitted when settings are saved
+    settings_saved = pyqtSignal()
 
     # Settings keys
     SETTINGS_PREFIX = "QgisGeemap/"
@@ -47,6 +57,8 @@ class SettingsDockWidget(QDockWidget):
         super().__init__("Geemap Settings", parent)
         self.iface = iface
         self.settings = QSettings()
+        self._deps_worker = None
+        self._auth_worker = None
 
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
 
@@ -73,16 +85,20 @@ class SettingsDockWidget(QDockWidget):
         layout.addWidget(header_label)
 
         # Tab widget for organized settings
-        tab_widget = QTabWidget()
-        layout.addWidget(tab_widget)
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # Dependencies tab (first tab)
+        deps_tab = self._create_dependencies_tab()
+        self.tab_widget.addTab(deps_tab, "Dependencies")
 
         # Earth Engine tab
         ee_tab = self._create_ee_tab()
-        tab_widget.addTab(ee_tab, "Earth Engine")
+        self.tab_widget.addTab(ee_tab, "Earth Engine")
 
         # General settings tab
         general_tab = self._create_general_tab()
-        tab_widget.addTab(general_tab, "General")
+        self.tab_widget.addTab(general_tab, "General")
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -104,6 +120,183 @@ class SettingsDockWidget(QDockWidget):
         self.status_label = QLabel("Settings loaded")
         self.status_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(self.status_label)
+
+    def _create_dependencies_tab(self):
+        """Create the dependencies management tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Info label
+        info_label = QLabel(
+            "This plugin requires additional Python packages.\n"
+            "Click 'Install Dependencies' to install them in an\n"
+            "isolated virtual environment (~/.qgis_geemap)."
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("font-size: 10px;")
+        layout.addWidget(info_label)
+
+        # Package status group
+        status_group = QGroupBox("Package Status")
+        self._deps_status_layout = QFormLayout(status_group)
+
+        # Create status labels for each package
+        self._deps_labels = {}
+        from ..core.venv_manager import REQUIRED_PACKAGES
+
+        for package_name, _version_spec in REQUIRED_PACKAGES:
+            label = QLabel("Checking...")
+            label.setStyleSheet("color: gray;")
+            self._deps_labels[package_name] = label
+            self._deps_status_layout.addRow(f"{package_name}:", label)
+
+        layout.addWidget(status_group)
+
+        # Install button
+        self.install_deps_btn = QPushButton("Install Dependencies")
+        self.install_deps_btn.clicked.connect(self._install_dependencies)
+        layout.addWidget(self.install_deps_btn)
+
+        # Progress bar (hidden by default)
+        self.deps_progress_bar = QProgressBar()
+        self.deps_progress_bar.setVisible(False)
+        layout.addWidget(self.deps_progress_bar)
+
+        # Progress/status label
+        self.deps_progress_label = QLabel("")
+        self.deps_progress_label.setWordWrap(True)
+        self.deps_progress_label.setVisible(False)
+        layout.addWidget(self.deps_progress_label)
+
+        # Cancel button (hidden by default)
+        self.cancel_deps_btn = QPushButton("Cancel")
+        self.cancel_deps_btn.setStyleSheet("color: red;")
+        self.cancel_deps_btn.setVisible(False)
+        self.cancel_deps_btn.clicked.connect(self._cancel_deps_install)
+        layout.addWidget(self.cancel_deps_btn)
+
+        # Refresh button
+        self.refresh_deps_btn = QPushButton("Refresh Status")
+        self.refresh_deps_btn.clicked.connect(self._refresh_deps_status)
+        layout.addWidget(self.refresh_deps_btn)
+
+        layout.addStretch()
+
+        # Initial status check
+        self._refresh_deps_status()
+
+        return widget
+
+    def _refresh_deps_status(self):
+        """Refresh the dependency status display."""
+        from ..core.venv_manager import check_dependencies
+
+        all_ok, missing, installed = check_dependencies()
+
+        for package_name, version in installed:
+            if package_name in self._deps_labels:
+                self._deps_labels[package_name].setText(f"v{version} (installed)")
+                self._deps_labels[package_name].setStyleSheet(
+                    "color: green; font-weight: bold;"
+                )
+
+        for package_name, _version_spec in missing:
+            if package_name in self._deps_labels:
+                self._deps_labels[package_name].setText("Not installed")
+                self._deps_labels[package_name].setStyleSheet("color: red;")
+
+        self.install_deps_btn.setEnabled(not all_ok)
+        if all_ok:
+            self.install_deps_btn.setText("All Dependencies Installed")
+        else:
+            self.install_deps_btn.setText(
+                f"Install Dependencies ({len(missing)} missing)"
+            )
+
+    def _install_dependencies(self):
+        """Start installing missing dependencies."""
+        from .deps_manager import DepsInstallWorker
+
+        # Guard against concurrent installs
+        if self._deps_worker is not None and self._deps_worker.isRunning():
+            return
+
+        # Update UI for installation mode
+        self.install_deps_btn.setEnabled(False)
+        self.refresh_deps_btn.setEnabled(False)
+        self.deps_progress_bar.setVisible(True)
+        self.deps_progress_bar.setRange(0, 100)
+        self.deps_progress_bar.setValue(0)
+        self.deps_progress_label.setVisible(True)
+        self.deps_progress_label.setText("Starting installation...")
+        self.deps_progress_label.setStyleSheet("")
+        self.cancel_deps_btn.setVisible(True)
+        self.cancel_deps_btn.setEnabled(True)
+
+        # Start worker
+        self._deps_worker = DepsInstallWorker()
+        self._deps_worker.progress.connect(self._on_deps_progress)
+        self._deps_worker.finished.connect(self._on_deps_finished)
+        self._deps_worker.start()
+
+    def _on_deps_progress(self, percent, message):
+        """Handle progress updates from the dependency install worker.
+
+        Args:
+            percent: Installation progress percentage (0-100).
+            message: Status message describing current operation.
+        """
+        self.deps_progress_bar.setValue(percent)
+        self.deps_progress_label.setText(message)
+
+    def _on_deps_finished(self, success, message):
+        """Handle completion of the dependency installation.
+
+        Args:
+            success: True if all packages installed successfully.
+            message: Summary message.
+        """
+        # Reset UI
+        self.deps_progress_bar.setVisible(False)
+        self.deps_progress_label.setText(message)
+        self.cancel_deps_btn.setVisible(False)
+        self.refresh_deps_btn.setEnabled(True)
+
+        if success:
+            self.deps_progress_label.setStyleSheet("color: green;")
+            self.iface.messageBar().pushSuccess(
+                "Geemap", "Dependencies installed successfully!"
+            )
+            self.deps_installed.emit()
+
+            # Auto-start EE authentication if credentials don't exist
+            from ..core.venv_manager import ee_credentials_exist
+
+            if not ee_credentials_exist():
+                self._start_auth()
+        else:
+            self.deps_progress_label.setStyleSheet("color: red;")
+            self.install_deps_btn.setEnabled(True)
+
+        # Refresh status display
+        self._refresh_deps_status()
+
+    def _cancel_deps_install(self):
+        """Cancel the ongoing dependency installation."""
+        if self._deps_worker is not None and self._deps_worker.isRunning():
+            self._deps_worker.cancel()
+            self.cancel_deps_btn.setEnabled(False)
+            self.deps_progress_label.setText("Cancelling...")
+
+    def show_dependencies_tab(self):
+        """Switch to the Dependencies tab and refresh status."""
+        self.tab_widget.setCurrentIndex(0)
+        self._refresh_deps_status()
+
+    def show_ee_tab(self):
+        """Switch to the Earth Engine tab and focus the project ID input."""
+        self.tab_widget.setCurrentIndex(1)
+        self.project_id_input.setFocus()
 
     def _create_ee_tab(self):
         """Create the Earth Engine settings tab."""
@@ -231,13 +424,25 @@ class SettingsDockWidget(QDockWidget):
                 self,
                 "Warning",
                 "Earth Engine API not installed.\n\n"
-                "Install with: pip install earthengine-api",
+                "Please install dependencies from the Dependencies tab first.",
             )
             return
 
-        try:
-            project = self.project_id_input.text().strip() or None
+        project = self.project_id_input.text().strip()
+        if not project:
+            project = os.environ.get("EE_PROJECT_ID", "")
 
+        if not project:
+            QMessageBox.warning(
+                self,
+                "Project ID Required",
+                "A Google Cloud project ID is required to initialize "
+                "Earth Engine.\n\nPlease enter your project ID above.",
+            )
+            self.project_id_input.setFocus()
+            return
+
+        try:
             # Check if credentials file is specified
             cred_file = self.credentials_input.text().strip()
             credentials = None
@@ -250,10 +455,7 @@ class SettingsDockWidget(QDockWidget):
                     scopes=["https://www.googleapis.com/auth/earthengine"],
                 )
 
-            if project:
-                ee.Initialize(credentials=credentials, project=project)
-            else:
-                ee.Initialize(credentials=credentials)
+            ee.Initialize(credentials=credentials, project=project)
 
             self.ee_status_label.setText("Status: Initialized ✓")
             self.ee_status_label.setStyleSheet("color: green;")
@@ -262,7 +464,7 @@ class SettingsDockWidget(QDockWidget):
             )
 
         except Exception as e:
-            self.ee_status_label.setText(f"Status: Error")
+            self.ee_status_label.setText("Status: Error")
             self.ee_status_label.setStyleSheet("color: red;")
             QMessageBox.critical(
                 self,
@@ -271,32 +473,61 @@ class SettingsDockWidget(QDockWidget):
             )
 
     def _authenticate_ee(self):
-        """Authenticate with Earth Engine."""
-        if ee is None:
-            QMessageBox.warning(
-                self,
-                "Warning",
-                "Earth Engine API not installed.\n\n"
-                "Install with: pip install earthengine-api",
-            )
+        """Start Earth Engine authentication in the background."""
+        self._start_auth()
+
+    def _start_auth(self):
+        """Start Earth Engine authentication in a background thread."""
+        from .deps_manager import EEAuthWorker
+
+        # Guard against concurrent auth
+        if self._auth_worker is not None and self._auth_worker.isRunning():
             return
 
-        try:
-            ee.Authenticate()
-            self.ee_status_label.setText(
-                "Status: Authenticated (restart may be needed)"
-            )
-            self.ee_status_label.setStyleSheet("color: green;")
+        self.ee_status_label.setText(
+            "Authenticating... A browser window should open.\n"
+            "Complete the sign-in and return here."
+        )
+        self.ee_status_label.setStyleSheet("color: blue;")
+        self.deps_progress_bar.setVisible(True)
+        self.deps_progress_bar.setRange(0, 0)  # Indeterminate
+
+        self._auth_worker = EEAuthWorker()
+        self._auth_worker.progress.connect(self._on_auth_progress)
+        self._auth_worker.finished.connect(self._on_auth_finished)
+        self._auth_worker.start()
+
+    def _on_auth_progress(self, percent, message):
+        """Handle auth progress updates.
+
+        Args:
+            percent: Progress percentage.
+            message: Status message.
+        """
+        self.ee_status_label.setText(message)
+
+    def _on_auth_finished(self, success, message):
+        """Handle authentication completion.
+
+        Args:
+            success: Whether authentication succeeded.
+            message: Result message.
+        """
+        self._auth_worker = None
+        self.deps_progress_bar.setVisible(False)
+        self.deps_progress_bar.setRange(0, 100)
+
+        if success:
+            self.ee_status_label.setText("Status: Credentials found")
+            self.ee_status_label.setStyleSheet("color: green; font-weight: bold;")
             self.iface.messageBar().pushSuccess(
                 "Geemap",
-                "Authentication complete. You may need to initialize Earth Engine.",
+                "Earth Engine authenticated successfully!",
             )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Authentication Error",
-                f"Failed to authenticate:\n\n{str(e)}",
-            )
+            self.auth_succeeded.emit()
+        else:
+            self.ee_status_label.setText(f"Authentication failed: {message[:150]}")
+            self.ee_status_label.setStyleSheet("color: red;")
 
     def _load_settings(self):
         """Load settings from QSettings."""
@@ -362,6 +593,7 @@ class SettingsDockWidget(QDockWidget):
         self.status_label.setStyleSheet("color: green; font-size: 10px;")
 
         self.iface.messageBar().pushSuccess("Geemap", "Settings saved successfully!")
+        self.settings_saved.emit()
 
     def _reset_defaults(self):
         """Reset all settings to defaults."""
