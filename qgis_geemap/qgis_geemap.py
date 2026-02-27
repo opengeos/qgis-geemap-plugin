@@ -42,9 +42,14 @@ class QgisGeemap:
         # Dependency state
         self._deps_ready = False
         self._deps_initialized = False
+        self._deps_signal_connected = False
 
     def _ensure_deps(self) -> bool:
-        """Check if dependencies are installed; prompt to install if not.
+        """Check if dependencies are installed and loaded.
+
+        Returns True if deps are ready. If not, shows a non-blocking
+        warning and offers to open Settings -> Dependencies tab.
+        Does NOT block the UI with a modal dialog.
 
         Returns:
             True if dependencies are ready and loaded, False otherwise.
@@ -61,26 +66,133 @@ class QgisGeemap:
                 self._deps_ready = True
                 self._post_deps_init()
                 return True
-            QMessageBox.critical(
-                self.iface.mainWindow(),
-                "Error",
-                "Failed to load dependency packages into Python path.",
-            )
-            return False
 
-        # Dependencies not ready -- show install dialog
-        from .dialogs.dependency_dialog import DependencyInstallDialog
-
-        dialog = DependencyInstallDialog(self.iface.mainWindow())
-        result = dialog.exec_()
-
-        if result == dialog.Accepted:
-            if ensure_venv_packages_available():
-                self._deps_ready = True
-                self._post_deps_init()
-                return True
-
+        # Dependencies not ready -- show non-blocking warning
+        self._check_dependencies_on_open()
         return False
+
+    def _check_dependencies_on_open(self):
+        """Check if dependencies are installed and prompt if missing."""
+        try:
+            from .core.venv_manager import check_dependencies
+
+            all_ok, missing, _installed = check_dependencies()
+            if all_ok:
+                return
+
+            missing_names = ", ".join(name for name, _ in missing)
+            reply = QMessageBox.warning(
+                self.iface.mainWindow(),
+                "Missing Dependencies",
+                f"The following required packages are not installed:\n\n"
+                f"  {missing_names}\n\n"
+                f"The Geemap plugin needs these packages to function.\n\n"
+                f"Would you like to open Settings to install them?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+
+            if reply == QMessageBox.Yes:
+                self._open_settings_deps_tab()
+
+        except Exception:
+            # Don't let dependency check errors prevent other actions
+            pass
+
+    def _open_settings_deps_tab(self):
+        """Open the Settings dock and switch to the Dependencies tab."""
+        if self._settings_dock is None:
+            try:
+                from .dialogs.settings_dock import SettingsDockWidget
+
+                self._settings_dock = SettingsDockWidget(
+                    self.iface, self.iface.mainWindow()
+                )
+                self._settings_dock.setObjectName("GeemapSettingsDock")
+                self._settings_dock.visibilityChanged.connect(
+                    self._on_settings_visibility_changed
+                )
+                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
+                self._connect_deps_signal()
+            except Exception as e:
+                QMessageBox.critical(
+                    self.iface.mainWindow(),
+                    "Error",
+                    f"Failed to create Settings panel:\n{str(e)}",
+                )
+                return
+
+        self._settings_dock.show()
+        self._settings_dock.raise_()
+        self.settings_action.setChecked(True)
+        self._settings_dock.show_dependencies_tab()
+
+    def _connect_deps_signal(self):
+        """Connect settings dock signals to refresh deps state."""
+        if not self._deps_signal_connected and self._settings_dock is not None:
+            self._settings_dock.deps_installed.connect(self._on_deps_installed)
+            self._settings_dock.auth_succeeded.connect(self._on_auth_completed)
+            self._settings_dock.settings_saved.connect(self._try_auto_init_ee)
+            self._deps_signal_connected = True
+
+    def _on_deps_installed(self):
+        """Handle successful dependency installation from settings dock."""
+        from .core.venv_manager import ensure_venv_packages_available
+
+        if ensure_venv_packages_available():
+            self._deps_ready = True
+            self._post_deps_init()
+            self.iface.messageBar().pushSuccess(
+                "Geemap",
+                "Dependencies installed! You can now use all Geemap features.",
+            )
+
+    def _on_auth_completed(self):
+        """Handle successful EE authentication from the settings dock.
+
+        Tries to initialize EE, and if no project ID is configured yet,
+        opens the Settings panel on the Earth Engine tab so the user can
+        enter one.
+        """
+        from .core.ee_layer import is_ee_initialized
+
+        self._try_auto_init_ee()
+
+        if not is_ee_initialized():
+            # Project ID not set yet — open Settings on the EE tab
+            self._show_settings_ee_tab()
+
+    def _show_settings_ee_tab(self):
+        """Open the Settings dock and switch to the Earth Engine tab."""
+        if self._settings_dock is None:
+            try:
+                from .dialogs.settings_dock import SettingsDockWidget
+
+                self._settings_dock = SettingsDockWidget(
+                    self.iface, self.iface.mainWindow()
+                )
+                self._settings_dock.setObjectName("GeemapSettingsDock")
+                self._settings_dock.visibilityChanged.connect(
+                    self._on_settings_visibility_changed
+                )
+                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
+                self._connect_deps_signal()
+            except Exception as e:
+                QMessageBox.critical(
+                    self.iface.mainWindow(),
+                    "Error",
+                    f"Failed to create Settings panel:\n{str(e)}",
+                )
+                return
+        else:
+            self._settings_dock.show()
+            self._settings_dock.raise_()
+        if self._settings_dock is not None:
+            self._settings_dock.show_ee_tab()
+            self.iface.messageBar().pushInfo(
+                "Geemap",
+                "Please enter your Google Cloud project ID and click Save Settings.",
+            )
 
     def _post_deps_init(self):
         """One-time initialization after dependencies are confirmed ready."""
@@ -323,18 +435,45 @@ class QgisGeemap:
             pass
 
     def _try_auto_init_ee(self):
-        """Try to auto-initialize Earth Engine if EE_PROJECT_ID is set."""
+        """Try to auto-initialize Earth Engine using settings or env var."""
         try:
-            from .core.ee_layer import try_auto_initialize_ee
+            from qgis.PyQt.QtCore import QSettings
+            from .core.ee_layer import initialize_ee, is_ee_initialized
 
-            if try_auto_initialize_ee():
-                pass
-                # self.iface.messageBar().pushSuccess(
-                #     "Geemap",
-                #     "Earth Engine auto-initialized using EE_PROJECT_ID environment variable",
-                # )
-        except Exception:
-            # Silently fail - user can manually initialize
+            if is_ee_initialized():
+                return
+
+            # Read project ID from plugin settings
+            settings = QSettings()
+            project_id = settings.value("QgisGeemap/project_id", "", type=str)
+            if project_id:
+                project_id = project_id.strip()
+                if not project_id:
+                    project_id = None
+
+            # Fall back to environment variable
+            if not project_id:
+                project_id = os.environ.get("EE_PROJECT_ID", None)
+
+            if project_id:
+                try:
+                    from qgis.core import QgsMessageLog, Qgis
+
+                    QgsMessageLog.logMessage(
+                        f"Auto-initializing Earth Engine with project: {project_id}",
+                        "Geemap",
+                        Qgis.Info,
+                    )
+                    initialize_ee(project=project_id)
+                except Exception as exc:
+                    from qgis.core import QgsMessageLog, Qgis
+
+                    QgsMessageLog.logMessage(
+                        f"Auto-init EE failed: {exc}",
+                        "Geemap",
+                        Qgis.Warning,
+                    )
+        except ImportError:
             pass
 
     def initialize_ee(self):
@@ -405,10 +544,11 @@ class QgisGeemap:
         self.geemap_action.setChecked(visible)
 
     def toggle_settings_dock(self):
-        """Toggle the Settings dock widget visibility."""
-        if not self._ensure_deps():
-            self.settings_action.setChecked(False)
-            return
+        """Toggle the Settings dock widget visibility.
+
+        Settings must be accessible even without dependencies installed,
+        because the Dependencies tab is how users install them.
+        """
         if self._settings_dock is None:
             try:
                 from .dialogs.settings_dock import SettingsDockWidget
@@ -423,6 +563,7 @@ class QgisGeemap:
                 self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
                 self._settings_dock.show()
                 self._settings_dock.raise_()
+                self._connect_deps_signal()
                 return
 
             except Exception as e:
