@@ -2,19 +2,28 @@
 
 Stubs the ``qgis`` package so the plugin's modules can be imported without a
 running QGIS instance. The stub reproduces the real ``qgis.PyQt`` shim
-behavior on Qt6: it re-exports ``QAction``, ``QActionGroup`` and ``QShortcut``
-from ``PyQt6.QtGui`` under ``qgis.PyQt.QtWidgets`` (they moved out of
-``QtWidgets`` in Qt6).
+behavior: on Qt6 it re-exports ``QAction``, ``QActionGroup`` and ``QShortcut``
+from ``QtGui`` under ``qgis.PyQt.QtWidgets`` (they moved out of ``QtWidgets``
+in Qt6); on Qt5 those classes already live in ``QtWidgets`` so no re-export
+is needed.
+
+The Qt binding is selected by the ``QT_BINDING`` env var (defaults to PyQt6,
+the migration target). CI runs the matrix under both bindings to catch
+regressions in either direction.
 """
 
+import importlib
+import os
 import sys
 import types
 from unittest.mock import MagicMock
 
-import PyQt6.QtCore
-import PyQt6.QtGui
-import PyQt6.QtNetwork
-import PyQt6.QtWidgets
+QT_BINDING = os.environ.get("QT_BINDING", "PyQt6")
+
+QtCore = importlib.import_module(f"{QT_BINDING}.QtCore")
+QtGui = importlib.import_module(f"{QT_BINDING}.QtGui")
+QtNetwork = importlib.import_module(f"{QT_BINDING}.QtNetwork")
+QtWidgets = importlib.import_module(f"{QT_BINDING}.QtWidgets")
 
 
 def _install_qgis_stub() -> None:
@@ -28,10 +37,10 @@ def _install_qgis_stub() -> None:
     qgis.PyQt = qgis_pyqt
 
     pyqt_submodules = {
-        "QtCore": PyQt6.QtCore,
-        "QtGui": PyQt6.QtGui,
-        "QtNetwork": PyQt6.QtNetwork,
-        "QtWidgets": PyQt6.QtWidgets,
+        "QtCore": QtCore,
+        "QtGui": QtGui,
+        "QtNetwork": QtNetwork,
+        "QtWidgets": QtWidgets,
     }
     for name, real in pyqt_submodules.items():
         alias = types.ModuleType(f"qgis.PyQt.{name}")
@@ -42,10 +51,13 @@ def _install_qgis_stub() -> None:
         setattr(qgis_pyqt, name, alias)
 
     # Qt6: QAction, QActionGroup, and QShortcut live in QtGui. The real
-    # qgis.PyQt.QtWidgets shim re-exports them, so mirror that here.
+    # qgis.PyQt.QtWidgets shim re-exports them, so mirror that here. On Qt5
+    # they're already on QtWidgets, so the lookup falls through to QtWidgets
+    # itself and no extra wiring is required.
     qtwidgets_alias = sys.modules["qgis.PyQt.QtWidgets"]
     for attr in ("QAction", "QActionGroup", "QShortcut"):
-        setattr(qtwidgets_alias, attr, getattr(PyQt6.QtGui, attr))
+        if hasattr(QtGui, attr):
+            setattr(qtwidgets_alias, attr, getattr(QtGui, attr))
 
     for submodule in ("QtSvg", "QtWebEngineWidgets"):
         alias = MagicMock()

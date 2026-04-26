@@ -8,30 +8,8 @@ bounding box and vector layer extent.
 
 import os
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
-
-
-def _require_https(url):
-    """Reject non-HTTPS URLs before passing them to urlretrieve.
-
-    Bandit (B310) flags ``urllib.request.urlretrieve`` because it accepts any
-    scheme ``urllib`` understands, including ``file://``. Earth Engine's
-    ``getDownloadURL`` returns ``https://earthengine.googleapis.com/...`` URLs
-    in practice, but enforcing the scheme here makes the assumption explicit
-    and fails closed if the API ever changes.
-
-    Args:
-        url: The download URL returned by Earth Engine.
-
-    Raises:
-        ValueError: If ``url`` is not an ``https://`` URL.
-    """
-    if urlparse(url).scheme != "https":
-        raise ValueError(f"Refusing non-https URL: {url}")
-
-
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
     QWidget,
@@ -65,6 +43,8 @@ from qgis.core import (
     QgsRectangle,
 )
 from qgis.gui import QgsMapLayerComboBox
+
+from ..core.net_utils import require_https
 
 try:
     import ee
@@ -142,7 +122,7 @@ class ExportWorker(QThread):
                     percent = min(int((downloaded / total_size) * 60) + 30, 90)
                     self.progress.emit(percent, "Downloading...")
 
-            _require_https(url)
+            require_https(url)
             urllib.request.urlretrieve(url, self.filename, reporthook)  # nosec B310
 
             self.progress.emit(100, "Export complete!")

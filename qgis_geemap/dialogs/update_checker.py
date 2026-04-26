@@ -10,33 +10,10 @@ import re
 import shutil
 import tempfile
 import zipfile
-from urllib.parse import urlparse
 from urllib.request import urlopen, urlretrieve
 from urllib.error import URLError, HTTPError
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
-
-
-def _require_https(url):
-    """Reject non-HTTPS URLs before passing them to urlopen/urlretrieve.
-
-    Bandit (B310) flags ``urlopen``/``urlretrieve`` because the underlying
-    ``urllib`` machinery accepts ``file://``, ``ftp://`` and other schemes that
-    can be turned into local-file disclosure if the URL is attacker-controlled.
-    The plugin only ever fetches from hard-coded ``https://github.com`` and
-    ``https://raw.githubusercontent.com`` URLs, but this guard makes that
-    invariant explicit and fail-closed.
-
-    Args:
-        url: The URL about to be opened.
-
-    Raises:
-        ValueError: If ``url`` is not an ``https://`` URL.
-    """
-    if urlparse(url).scheme != "https":
-        raise ValueError(f"Refusing non-https URL: {url}")
-
-
 from qgis.PyQt.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -50,6 +27,8 @@ from qgis.PyQt.QtWidgets import (
     QTextEdit,
 )
 from qgis.PyQt.QtGui import QFont
+
+from ..core.net_utils import require_https
 
 # GitHub URLs for the plugin
 GITHUB_REPO = "opengeos/qgis-geemap-plugin"
@@ -68,7 +47,7 @@ class VersionCheckWorker(QThread):
     def run(self):
         """Fetch the latest metadata from GitHub."""
         try:
-            _require_https(METADATA_URL)
+            require_https(METADATA_URL)
             with urlopen(METADATA_URL, timeout=15) as response:  # nosec B310
                 content = response.read().decode("utf-8")
 
@@ -130,7 +109,7 @@ class DownloadWorker(QThread):
                     percent = min(int((downloaded / total_size) * 50), 50)
                     self.progress.emit(10 + percent, "Downloading...")
 
-            _require_https(ZIP_URL)
+            require_https(ZIP_URL)
             urlretrieve(ZIP_URL, zip_path, reporthook)  # nosec B310
 
             self.progress.emit(60, "Extracting files...")
