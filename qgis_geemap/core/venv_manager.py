@@ -11,7 +11,7 @@ import importlib.metadata
 import os
 import platform
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from typing import Callable, Optional, Tuple
@@ -344,7 +344,9 @@ def create_venv(venv_dir=None, progress_callback=None):
 
         os.makedirs(os.path.dirname(venv_dir), exist_ok=True)
 
-        result = subprocess.run(
+        # cmd is built from plugin-managed python/uv paths plus fixed venv
+        # creation args; no user shell input flows into it.
+        result = subprocess.run(  # nosec B603
             cmd,
             capture_output=True,
             text=True,
@@ -369,7 +371,8 @@ def create_venv(venv_dir=None, progress_callback=None):
                         "--upgrade",
                     ]
                     try:
-                        ensurepip_result = subprocess.run(
+                        # ensurepip_cmd is [<plugin-managed python>, "-m", "ensurepip", "--upgrade"].
+                        ensurepip_result = subprocess.run(  # nosec B603
                             ensurepip_cmd,
                             capture_output=True,
                             text=True,
@@ -573,7 +576,9 @@ def _run_install_subprocess(
         A tuple of (returncode: int, stdout: str, stderr: str).
             returncode is -1 if cancelled, -2 if timed out.
     """
-    proc = subprocess.Popen(
+    # cmd is constructed by internal callers from plugin-managed paths and
+    # package names from a curated requirements list; no user shell input.
+    proc = subprocess.Popen(  # nosec B603
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -818,7 +823,10 @@ def verify_venv(venv_dir=None, progress_callback=None):
         cmd = [python_path, "-c", verify_code]
 
         try:
-            result = subprocess.run(
+            # cmd is [<plugin-managed python>, "-c", verify_code] where
+            # verify_code comes from _get_verification_code() (a hardcoded
+            # mapping, not user input).
+            result = subprocess.run(  # nosec B603
                 cmd,
                 capture_output=True,
                 text=True,
@@ -1217,8 +1225,11 @@ def cleanup_old_venv_directories():
                     else:
                         os.remove(path)
                     removed.append(path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log(
+                        f"Failed to remove venv artifact {path}: {exc}",
+                        Qgis.Warning,
+                    )
 
     return removed
 

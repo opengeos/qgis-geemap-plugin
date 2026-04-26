@@ -8,8 +8,30 @@ bounding box and vector layer extent.
 
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
+
+
+def _require_https(url):
+    """Reject non-HTTPS URLs before passing them to urlretrieve.
+
+    Bandit (B310) flags ``urllib.request.urlretrieve`` because it accepts any
+    scheme ``urllib`` understands, including ``file://``. Earth Engine's
+    ``getDownloadURL`` returns ``https://earthengine.googleapis.com/...`` URLs
+    in practice, but enforcing the scheme here makes the assumption explicit
+    and fails closed if the API ever changes.
+
+    Args:
+        url: The download URL returned by Earth Engine.
+
+    Raises:
+        ValueError: If ``url`` is not an ``https://`` URL.
+    """
+    if urlparse(url).scheme != "https":
+        raise ValueError(f"Refusing non-https URL: {url}")
+
+
 from qgis.PyQt.QtWidgets import (
     QDockWidget,
     QWidget,
@@ -120,7 +142,8 @@ class ExportWorker(QThread):
                     percent = min(int((downloaded / total_size) * 60) + 30, 90)
                     self.progress.emit(percent, "Downloading...")
 
-            urllib.request.urlretrieve(url, self.filename, reporthook)
+            _require_https(url)
+            urllib.request.urlretrieve(url, self.filename, reporthook)  # nosec B310
 
             self.progress.emit(100, "Export complete!")
             self.finished.emit(self.filename)
@@ -143,7 +166,9 @@ class ExportDockWidget(QDockWidget):
         self.iface = iface
         self._worker = None
 
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
         self._setup_ui()
         self._refresh_ee_layers()
 
@@ -161,7 +186,7 @@ class ExportDockWidget(QDockWidget):
         # Create scroll area for the content
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
@@ -173,7 +198,7 @@ class ExportDockWidget(QDockWidget):
         header_font.setPointSize(11)
         header_font.setBold(True)
         header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header_label)
 
         # Image selection
@@ -375,8 +400,8 @@ class ExportDockWidget(QDockWidget):
 
     def _toggle_custom_asset(self, state):
         """Toggle custom asset ID input."""
-        self.custom_asset_input.setEnabled(state == Qt.Checked)
-        self.ee_layer_combo.setEnabled(state != Qt.Checked)
+        self.custom_asset_input.setEnabled(state == Qt.CheckState.Checked)
+        self.ee_layer_combo.setEnabled(state != Qt.CheckState.Checked)
 
     def _update_region_inputs(self):
         """Update region input states based on selection."""
@@ -563,11 +588,11 @@ class ExportDockWidget(QDockWidget):
             self,
             "Export Complete",
             f"Image exported to:\n{filename}\n\nAdd to map?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             # Add the exported image to QGIS
             layer_name = os.path.basename(filename)
             layer = QgsRasterLayer(filename, layer_name)

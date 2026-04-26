@@ -208,7 +208,7 @@ class InspectorMapTool(QgsMapTool):
         """
         super().__init__(canvas)
         self.inspector_dock = inspector_dock
-        self.setCursor(QCursor(Qt.CrossCursor))
+        self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
 
     def canvasReleaseEvent(self, event):
         """Handle mouse click on the map."""
@@ -243,7 +243,9 @@ class InspectorDockWidget(QDockWidget):
         self.iface = iface
         self._worker = None
 
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
         self._setup_ui()
 
     def _setup_ui(self):
@@ -260,7 +262,7 @@ class InspectorDockWidget(QDockWidget):
         header_font.setPointSize(12)
         header_font.setBold(True)
         header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header_label)
 
         # Instructions
@@ -286,8 +288,12 @@ class InspectorDockWidget(QDockWidget):
 
         self.results_tree = QTreeWidget()
         self.results_tree.setHeaderLabels(["Property", "Value"])
-        self.results_tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.results_tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.results_tree.header().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.results_tree.header().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
         self.results_tree.setAlternatingRowColors(True)
         results_layout.addWidget(self.results_tree)
 

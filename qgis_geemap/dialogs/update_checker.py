@@ -10,10 +10,33 @@ import re
 import shutil
 import tempfile
 import zipfile
+from urllib.parse import urlparse
 from urllib.request import urlopen, urlretrieve
 from urllib.error import URLError, HTTPError
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
+
+
+def _require_https(url):
+    """Reject non-HTTPS URLs before passing them to urlopen/urlretrieve.
+
+    Bandit (B310) flags ``urlopen``/``urlretrieve`` because the underlying
+    ``urllib`` machinery accepts ``file://``, ``ftp://`` and other schemes that
+    can be turned into local-file disclosure if the URL is attacker-controlled.
+    The plugin only ever fetches from hard-coded ``https://github.com`` and
+    ``https://raw.githubusercontent.com`` URLs, but this guard makes that
+    invariant explicit and fail-closed.
+
+    Args:
+        url: The URL about to be opened.
+
+    Raises:
+        ValueError: If ``url`` is not an ``https://`` URL.
+    """
+    if urlparse(url).scheme != "https":
+        raise ValueError(f"Refusing non-https URL: {url}")
+
+
 from qgis.PyQt.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -45,7 +68,8 @@ class VersionCheckWorker(QThread):
     def run(self):
         """Fetch the latest metadata from GitHub."""
         try:
-            with urlopen(METADATA_URL, timeout=15) as response:
+            _require_https(METADATA_URL)
+            with urlopen(METADATA_URL, timeout=15) as response:  # nosec B310
                 content = response.read().decode("utf-8")
 
             # Parse version from metadata
@@ -106,7 +130,8 @@ class DownloadWorker(QThread):
                     percent = min(int((downloaded / total_size) * 50), 50)
                     self.progress.emit(10 + percent, "Downloading...")
 
-            urlretrieve(ZIP_URL, zip_path, reporthook)
+            _require_https(ZIP_URL)
+            urlretrieve(ZIP_URL, zip_path, reporthook)  # nosec B310
 
             self.progress.emit(60, "Extracting files...")
 
@@ -226,7 +251,7 @@ class UpdateCheckerDialog(QDialog):
         header_font.setPointSize(14)
         header_font.setBold(True)
         header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header_label)
 
         # Version info group
@@ -271,7 +296,7 @@ class UpdateCheckerDialog(QDialog):
         # Progress label
         self.progress_label = QLabel("")
         self.progress_label.setVisible(False)
-        self.progress_label.setAlignment(Qt.AlignCenter)
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.progress_label)
 
         # Buttons
@@ -300,7 +325,7 @@ class UpdateCheckerDialog(QDialog):
         )
         info_label.setWordWrap(True)
         info_label.setOpenExternalLinks(True)
-        info_label.setAlignment(Qt.AlignCenter)
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info_label)
 
     def check_for_updates(self):
@@ -391,11 +416,11 @@ class UpdateCheckerDialog(QDialog):
             f"This will download and install version {self.latest_version}.\n\n"
             "IMPORTANT: You will need to restart QGIS after the update completes.\n\n"
             "Do you want to continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
 
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         self.check_btn.setEnabled(False)
@@ -476,10 +501,10 @@ class UpdateCheckerDialog(QDialog):
                 self,
                 "Download in Progress",
                 "A download is in progress. Are you sure you want to cancel?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if reply != QMessageBox.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
             self.download_worker.terminate()

@@ -24,7 +24,7 @@ A QGIS plugin that integrates [geemap](https://geemap.org) for working with Goog
 
 ### Prerequisites
 
-1. **QGIS 3.28 or higher**
+1. **QGIS 3.28 or higher** (works on QGIS 3.x with Qt5 and QGIS 4.0 with Qt6)
 2. **Google Earth Engine Account**: Sign up at [earthengine.google.com](https://earthengine.google.com/)
 
 ### Install QGIS and Google Earth Engine
