@@ -51,7 +51,9 @@ class GeemapDockWidget(QDockWidget):
         self.iface = iface
         self._map = None
 
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
 
         self._setup_ui()
 
@@ -71,7 +73,7 @@ class GeemapDockWidget(QDockWidget):
         header_font.setPointSize(12)
         header_font.setBold(True)
         header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header_label)
 
         # Tab widget
@@ -301,7 +303,7 @@ class GeemapDockWidget(QDockWidget):
             return
 
         # Set waiting cursor
-        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
 
         try:
             self._show_progress("Loading image...")
@@ -358,7 +360,7 @@ class GeemapDockWidget(QDockWidget):
             return
 
         # Set waiting cursor
-        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
 
         try:
             self._show_progress("Loading feature collection...")
@@ -395,7 +397,17 @@ class GeemapDockWidget(QDockWidget):
         QCoreApplication.processEvents()
 
     def _run_code(self):
-        """Execute the code in the console."""
+        """Execute the user-authored code in the in-plugin Python console.
+
+        Security note: this method intentionally calls ``exec`` on text the
+        user typed into the dock's code input. Running arbitrary Python is the
+        feature, mirroring QGIS's built-in Python console and the geemap
+        notebook workflow. The code runs inside the user's QGIS process with
+        the user's own privileges and against an in-process ``ee``/``geemap``
+        namespace, so no privilege boundary is being crossed. Bandit B102 is
+        suppressed at the call site for this reason; do NOT route any
+        non-user-authored input through this method.
+        """
         code = self.code_input.toPlainText()
         if not code.strip():
             return
@@ -428,8 +440,9 @@ class GeemapDockWidget(QDockWidget):
             except ImportError:
                 pass
 
-            # Execute the code
-            exec(code, namespace)
+            # Execute the user-authored code; see _run_code docstring for the
+            # security rationale behind suppressing B102 here.
+            exec(code, namespace)  # nosec B102
 
             self.code_output.setPlainText("Code executed successfully!")
             self.code_output.setStyleSheet("color: green;")

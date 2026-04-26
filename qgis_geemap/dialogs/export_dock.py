@@ -44,6 +44,8 @@ from qgis.core import (
 )
 from qgis.gui import QgsMapLayerComboBox
 
+from ..core.net_utils import require_https
+
 try:
     import ee
 except ImportError:
@@ -120,7 +122,8 @@ class ExportWorker(QThread):
                     percent = min(int((downloaded / total_size) * 60) + 30, 90)
                     self.progress.emit(percent, "Downloading...")
 
-            urllib.request.urlretrieve(url, self.filename, reporthook)
+            require_https(url)
+            urllib.request.urlretrieve(url, self.filename, reporthook)  # nosec B310
 
             self.progress.emit(100, "Export complete!")
             self.finished.emit(self.filename)
@@ -143,7 +146,9 @@ class ExportDockWidget(QDockWidget):
         self.iface = iface
         self._worker = None
 
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
         self._setup_ui()
         self._refresh_ee_layers()
 
@@ -161,7 +166,7 @@ class ExportDockWidget(QDockWidget):
         # Create scroll area for the content
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
@@ -173,7 +178,7 @@ class ExportDockWidget(QDockWidget):
         header_font.setPointSize(11)
         header_font.setBold(True)
         header_label.setFont(header_font)
-        header_label.setAlignment(Qt.AlignCenter)
+        header_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(header_label)
 
         # Image selection
@@ -375,8 +380,8 @@ class ExportDockWidget(QDockWidget):
 
     def _toggle_custom_asset(self, state):
         """Toggle custom asset ID input."""
-        self.custom_asset_input.setEnabled(state == Qt.Checked)
-        self.ee_layer_combo.setEnabled(state != Qt.Checked)
+        self.custom_asset_input.setEnabled(state == Qt.CheckState.Checked)
+        self.ee_layer_combo.setEnabled(state != Qt.CheckState.Checked)
 
     def _update_region_inputs(self):
         """Update region input states based on selection."""
@@ -563,11 +568,11 @@ class ExportDockWidget(QDockWidget):
             self,
             "Export Complete",
             f"Image exported to:\n{filename}\n\nAdd to map?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             # Add the exported image to QGIS
             layer_name = os.path.basename(filename)
             layer = QgsRasterLayer(filename, layer_name)

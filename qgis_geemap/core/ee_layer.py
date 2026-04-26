@@ -173,7 +173,7 @@ def _load_ee_credentials():
         return Credentials(
             token=None,
             refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
+            token_uri="https://oauth2.googleapis.com/token",  # nosec B106
             client_id=data.get("client_id"),
             client_secret=data.get("client_secret"),
         )

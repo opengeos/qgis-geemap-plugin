@@ -88,16 +88,21 @@ class QgisGeemap:
                 f"  {missing_names}\n\n"
                 f"The Geemap plugin needs these packages to function.\n\n"
                 f"Would you like to open Settings to install them?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
 
-            if reply == QMessageBox.Yes:
+            if reply == QMessageBox.StandardButton.Yes:
                 self._open_settings_deps_tab()
 
-        except Exception:
-            # Don't let dependency check errors prevent other actions
-            pass
+        except Exception as exc:
+            # Don't let dependency check errors prevent other actions, but
+            # surface them in the log so users can self-diagnose.
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(
+                f"Dependency check failed: {exc}", "Geemap", Qgis.Warning
+            )
 
     def _open_settings_deps_tab(self):
         """Open the Settings dock and switch to the Dependencies tab."""
@@ -112,7 +117,9 @@ class QgisGeemap:
                 self._settings_dock.visibilityChanged.connect(
                     self._on_settings_visibility_changed
                 )
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._settings_dock
+                )
                 self._connect_deps_signal()
             except Exception as e:
                 QMessageBox.critical(
@@ -175,7 +182,9 @@ class QgisGeemap:
                 self._settings_dock.visibilityChanged.connect(
                     self._on_settings_visibility_changed
                 )
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._settings_dock
+                )
                 self._connect_deps_signal()
             except Exception as e:
                 QMessageBox.critical(
@@ -419,9 +428,16 @@ class QgisGeemap:
             from .core.qgis_map import patch_geemap
 
             patch_geemap()
-        except Exception as e:
-            # Silently fail if geemap is not installed
-            pass
+        except Exception as exc:
+            # geemap may not be installed yet (deps installer hasn't run).
+            # Log at Info, not Warning, since the plugin still works.
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(
+                f"geemap not patched (likely not installed yet): {exc}",
+                "Geemap",
+                Qgis.Info,
+            )
 
     def _unpatch_geemap(self):
         """Restore original geemap.Map class."""
@@ -431,8 +447,14 @@ class QgisGeemap:
             if hasattr(geemap, "_OriginalMap"):
                 geemap.Map = geemap._OriginalMap
                 delattr(geemap, "_OriginalMap")
-        except Exception:
-            pass
+        except Exception as exc:
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(
+                f"geemap unpatch failed (probably already gone): {exc}",
+                "Geemap",
+                Qgis.Info,
+            )
 
     def _try_auto_init_ee(self):
         """Try to auto-initialize Earth Engine using settings or env var."""
@@ -518,7 +540,9 @@ class QgisGeemap:
                 self._geemap_dock.visibilityChanged.connect(
                     self._on_geemap_visibility_changed
                 )
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._geemap_dock)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._geemap_dock
+                )
                 self._geemap_dock.show()
                 self._geemap_dock.raise_()
                 return
@@ -560,7 +584,9 @@ class QgisGeemap:
                 self._settings_dock.visibilityChanged.connect(
                     self._on_settings_visibility_changed
                 )
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._settings_dock)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._settings_dock
+                )
                 self._settings_dock.show()
                 self._settings_dock.raise_()
                 self._connect_deps_signal()
@@ -605,7 +631,7 @@ class QgisGeemap:
                     )
                     self._inspector_dock.setObjectName("GeemapInspectorDock")
                     self.iface.addDockWidget(
-                        Qt.RightDockWidgetArea, self._inspector_dock
+                        Qt.DockWidgetArea.RightDockWidgetArea, self._inspector_dock
                     )
 
                 # Create and activate the map tool
@@ -661,7 +687,9 @@ class QgisGeemap:
                 self._export_dock.visibilityChanged.connect(
                     self._on_export_visibility_changed
                 )
-                self.iface.addDockWidget(Qt.RightDockWidgetArea, self._export_dock)
+                self.iface.addDockWidget(
+                    Qt.DockWidgetArea.RightDockWidgetArea, self._export_dock
+                )
                 self._export_dock.show()
                 self._export_dock.raise_()
                 return
@@ -761,7 +789,7 @@ m.add_layer(dem, {{"min": 0, "max": 4000}}, "DEM")
 
         try:
             dialog = UpdateCheckerDialog(self.plugin_dir, self.iface.mainWindow())
-            dialog.exec_()
+            dialog.exec()
         except Exception as e:
             QMessageBox.critical(
                 self.iface.mainWindow(),

@@ -11,7 +11,7 @@ import os
 import sys
 import platform
 import stat
-import subprocess
+import subprocess  # nosec B404
 import tarfile
 import zipfile
 import tempfile
@@ -263,7 +263,9 @@ def verify_uv():
         if sys.platform == "win32":
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-        result = subprocess.run(
+        # uv_path is a path the plugin manages itself (a downloaded uv
+        # binary); argv is fully fixed.
+        result = subprocess.run(  # nosec B603
             [uv_path, "--version"],
             capture_output=True,
             text=True,
