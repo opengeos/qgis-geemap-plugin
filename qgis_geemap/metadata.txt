@@ -3,7 +3,7 @@ name=Geemap
 qgisMinimumVersion=3.28
 qgisMaximumVersion=4.99
 description=A QGIS plugin that integrates geemap for working with Google Earth Engine data.
-version=0.4.1
+version=0.4.2
 author=Qiusheng Wu
 email=giswqs@gmail.com
 
@@ -40,6 +40,8 @@ experimental=False
 deprecated=False
 
 changelog=
+    0.4.2
+        - Fix macOS QGIS installer dependency installation
     0.4.1
         - Fixed dependency installer Python detection for macOS QGIS app bundles
     0.4.0
