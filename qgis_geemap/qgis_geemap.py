@@ -11,9 +11,9 @@ from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMenu, QToolBar, QMessageBox
 
-
 TOOLBAR_OBJECT_NAME = "GeemapToolbar"
 MENU_TITLE = "&Geemap"
+
 
 class QgisGeemap:
     """QGIS Geemap plugin implementation class for QGIS."""
@@ -383,7 +383,6 @@ class QgisGeemap:
             status_tip="About QGIS Geemap",
             parent=self.iface.mainWindow(),
         )
-
 
     def _remove_toolbar(self, toolbar):
         """Detach and schedule deletion of a plugin toolbar widget."""
